@@ -28,6 +28,25 @@ jobs:
       - run: npm run release:verify
       - run: npm run build
       - run: npm run build:backend
-      - name: Build and publish installer plus update metadata
+      - name: Build installer and update metadata
         shell: pwsh
-        run: npx.cmd electron-builder --win nsis --publish always
+        run: npx.cmd electron-builder --win nsis --publish never
+      - name: Publish one complete GitHub release
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          $directory = "release-$version"
+          $assets = @(
+            "$directory/Shree-Setup-$version-x64.exe",
+            "$directory/Shree-Setup-$version-x64.exe.blockmap",
+            "$directory/latest.yml"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset)) { throw "Required release asset is missing: $asset" }
+          }
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --verify-tag --title "Shree $version" --generate-notes
+          }
+          gh release upload $tag $assets --repo $env:GITHUB_REPOSITORY --clobber
