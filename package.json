@@ -79,6 +79,14 @@
       "output": "release-1.1.39",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "NotQuiteAyush",
+        "repo": "Shree-AI",
+        "releaseType": "release"
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "build/shree.ico",

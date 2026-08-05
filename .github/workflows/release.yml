@@ -30,10 +30,4 @@ jobs:
       - run: npm run build:backend
       - name: Build and publish installer plus update metadata
         shell: pwsh
-        run: |
-          $parts = $env:GITHUB_REPOSITORY.Split('/')
-          npx.cmd electron-builder --win nsis --publish always `
-            -c.publish.provider=github `
-            -c.publish.owner=$($parts[0]) `
-            -c.publish.repo=$($parts[1]) `
-            -c.publish.releaseType=release
+        run: npx.cmd electron-builder --win nsis --publish always
