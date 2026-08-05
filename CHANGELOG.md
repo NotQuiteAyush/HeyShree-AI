@@ -2,6 +2,7 @@
 
 ## 1.1.39
 
+- Early-access Windows release. This build is not Authenticode-signed, so Windows may display an Unknown publisher warning.
 - Added secure in-app updates for all public Windows installations.
 - Added real download progress, release notes, update channels, retry, skip, remind-later, and safe restart controls.
 - Added data-preserving database migrations and verified pre-migration backups.

@@ -1,6 +1,6 @@
 # Publishing Shree updates
 
-Public updates are published by the GitHub Actions release workflow. The GitHub repository and its Releases must be public so installed copies can download updates without a personal access token. Add the Windows code-signing certificate as the repository secrets `CSC_LINK` and `CSC_KEY_PASSWORD`. Push a tag matching `package.json`, for example `v1.1.39`.
+Public updates are published by the GitHub Actions release workflow. The GitHub repository and its Releases must be public so installed copies can download updates without a personal access token. Version 1.1.39 is an explicitly unsigned early-access bootstrap release; Windows may display an Unknown publisher warning. Before a production release, add a trusted Windows code-signing certificate as the repository secrets `CSC_LINK` and `CSC_KEY_PASSWORD` and restore certificate enforcement in the workflow. Push a tag matching `package.json`, for example `v1.1.39`.
 
 The workflow verifies versions and tests, builds the React application and Python sidecar, signs the NSIS installer, and publishes the installer, blockmap, and channel metadata to the repository release. Installed copies check that HTTPS feed after startup and every eight hours. Stable users receive stable releases; beta and alpha channels are opt-in.
 

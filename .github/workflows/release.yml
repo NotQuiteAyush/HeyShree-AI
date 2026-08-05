@@ -1,4 +1,4 @@
-name: Publish signed Shree update
+name: Publish Shree update
 
 on:
   push:
@@ -13,8 +13,7 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      CSC_IDENTITY_AUTO_DISCOVERY: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,12 +23,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Require Windows code-signing certificate
-        shell: pwsh
-        run: |
-          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) {
-            throw "Public releases require CSC_LINK and CSC_KEY_PASSWORD repository secrets."
-          }
       - run: npm ci
       - run: uv sync --project backend --locked
       - run: npm run release:verify
@@ -42,4 +35,5 @@ jobs:
           npx.cmd electron-builder --win nsis --publish always `
             -c.publish.provider=github `
             -c.publish.owner=$($parts[0]) `
-            -c.publish.repo=$($parts[1])
+            -c.publish.repo=$($parts[1]) `
+            -c.publish.releaseType=release
