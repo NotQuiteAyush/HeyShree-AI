@@ -1,0 +1,43 @@
+[project]
+name = "shree-backend"
+version = "1.1.39"
+description = "Secure local FastAPI backend for Shree Mark 12"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "pydantic-settings>=2.10,<3",
+  "google-genai>=1.26,<2",
+  "aiosqlite>=0.21,<1",
+  "httpx>=0.28,<1",
+  "python-multipart>=0.0.20,<1",
+  "psutil>=7,<8",
+  "mss>=10,<11",
+  "pillow>=12.3,<13",
+  "keyring>=25.6,<26",
+  "pycaw>=20251023,<20270000",
+  "comtypes>=1.4,<2",
+  "pywinauto>=0.6.9,<1",
+  "pywin32>=311,<400",
+  "send2trash>=1.8,<2",
+  "winrt-Windows.Media.Control==3.2.1",
+  "winrt-Windows.Foundation==3.2.1",
+]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shree*"]
+
+[dependency-groups]
+dev = ["pytest>=9.0.3,<10", "pytest-asyncio>=1.1,<2", "httpx>=0.28,<1", "pyinstaller>=6.16,<7"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv]
+cache-dir = ".uv-cache"

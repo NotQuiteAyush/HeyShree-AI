@@ -1,0 +1,6 @@
+{
+  "name": "Shree — Mark 12",
+  "description": "Ayush's real-time Windows desktop AI companion, Shree Mark 12, powered by Gemini Live.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
