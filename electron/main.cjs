@@ -310,7 +310,58 @@ function backendCommand() {
   const project = app.isPackaged
     ? path.join(process.resourcesPath, 'backend')
     : path.join(app.getAppPath(), 'backend');
-  return ['uv', ['run', '--project', project, 'uvicorn', 'shree.main:app', '--host', '127.0.0.1', '--port', String(backendPort)]];
+  return ['uv', ['run', '--project', project, 'uvicorn', 'shree.main:app', '--host', '0.0.0.0', '--port', String(backendPort)]];
+}
+
+const MOBILE_FIREWALL_RULE = 'Shree Mobile Companion';
+
+function backendExecutablePath() {
+  return backendCommand()[0];
+}
+
+function mobileFirewallStatus() {
+  if (process.platform !== 'win32') return { supported: false, allowed: true, port: backendPort };
+  const result = spawnSync('netsh.exe', ['advfirewall', 'firewall', 'show', 'rule', `name=${MOBILE_FIREWALL_RULE}`, 'verbose'], {
+    windowsHide: true,
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const expectedProgram = backendExecutablePath().toLowerCase();
+  return {
+    supported: true,
+    allowed: result.status === 0 && output.toLowerCase().includes(expectedProgram),
+    port: backendPort,
+  };
+}
+
+function allowMobileFirewallAccess() {
+  if (process.platform !== 'win32') return Promise.resolve({ supported: false, allowed: true, port: backendPort });
+  const executable = backendExecutablePath();
+  if (!path.isAbsolute(executable) || !fs.existsSync(executable)) {
+    throw new Error('The packaged SHREE backend was not found. Install or unpack SHREE before enabling phone access.');
+  }
+  const escapedExecutable = executable.replaceAll("'", "''");
+  const escapedRule = MOBILE_FIREWALL_RULE.replaceAll("'", "''");
+  const script = [
+    `$rule = '${escapedRule}'`,
+    `$program = '${escapedExecutable}'`,
+    `& netsh.exe advfirewall firewall delete rule name=\"$rule\" | Out-Null`,
+    `& netsh.exe advfirewall firewall add rule name=\"$rule\" dir=in action=allow program=\"$program\" protocol=TCP remoteip=LocalSubnet profile=private,public enable=yes`,
+    `exit $LASTEXITCODE`,
+  ].join('; ');
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `try { $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $process.ExitCode } catch { if ($_.Exception.NativeErrorCode -eq 1223) { exit 1223 }; exit 1 }`,
+    ], { windowsHide: true, stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code === 0) resolve(mobileFirewallStatus());
+      else reject(new Error(code === 1223 ? 'Windows administrator approval was cancelled.' : 'Windows could not allow SHREE through the firewall.'));
+    });
+  });
 }
 
 async function startBackend() {
@@ -319,7 +370,7 @@ async function startBackend() {
   backendProcess = spawn(command, args, {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, SHREE_DESKTOP: '1', SHREE_BACKEND_PORT: String(backendPort) },
+    env: { ...process.env, SHREE_DESKTOP: '1', SHREE_BACKEND_HOST: '0.0.0.0', SHREE_BACKEND_PORT: String(backendPort) },
   });
   backendProcess.stdout.on('data', (data) => log.info(`[backend] ${String(data).trim()}`));
   backendProcess.stderr.on('data', (data) => log.warn(`[backend] ${String(data).trim()}`));
@@ -816,6 +867,8 @@ ipcMain.handle('app:remind-update-later', () => updater.remindLater());
 ipcMain.handle('app:skip-update-version', () => updater.skipVersion());
 ipcMain.handle('app:set-update-channel', (_event, channel) => updater.setChannel(String(channel)));
 ipcMain.handle('app:restart', () => { quitting = true; app.relaunch(); app.exit(0); return true; });
+ipcMain.handle('mobile:firewall-status', () => mobileFirewallStatus());
+ipcMain.handle('mobile:allow-firewall', () => allowMobileFirewallAccess());
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
   updater = new ShreeUpdater({

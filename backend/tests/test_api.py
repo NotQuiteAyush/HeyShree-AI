@@ -25,18 +25,37 @@ async def test_health_and_memory_save_without_confirmation():
         response=await http.get("/api/health"); assert response.status_code==200
         saved=await http.post("/api/memories",json={"category":"Preferences","content":"User likes blue"}); assert saved.status_code==201
 
+
+@pytest.mark.asyncio
+async def test_worldwide_mobile_relay_is_enabled_once_and_respects_opt_out():
+    from shree.database import initialize_database
+    from shree.settings_store import get_application_settings, update_application_settings
+
+    await initialize_database()
+    settings = await get_application_settings()
+    assert settings.mobile_remote_access_enabled is True
+    assert settings.mobile_relay_url == "https://shree-e2e-relay.shree-e2e-relay.workers.dev"
+    assert settings.mobile_worldwide_migrated is True
+
+    await update_application_settings({"mobile_remote_access_enabled": False})
+    settings = await get_application_settings()
+    assert settings.mobile_remote_access_enabled is False
+
 @pytest.mark.asyncio
 async def test_database_migration_runs_once_and_creates_verified_backup():
     from shree.database import connect, initialize_database
     await initialize_database()
     settings = get_settings()
-    backups = list((settings.data_dir / "backups").glob("shree-before-v1-*.db"))
+    backups = list((settings.data_dir / "backups").glob("shree-before-v2-*.db"))
     assert len(backups) == 1 and backups[0].stat().st_size > 0
     async with connect() as db:
         rows = await (await db.execute("SELECT version,name FROM schema_migrations")).fetchall()
-        assert [(row["version"], row["name"]) for row in rows] == [(1, "initial_shree_schema")]
+        assert [(row["version"], row["name"]) for row in rows] == [
+            (1, "initial_shree_schema"),
+            (2, "secure_mobile_companion"),
+        ]
     await initialize_database()
-    assert list((settings.data_dir / "backups").glob("shree-before-v1-*.db")) == backups
+    assert list((settings.data_dir / "backups").glob("shree-before-v2-*.db")) == backups
 
 @pytest.mark.asyncio
 async def test_update_install_waits_for_file_operations_and_cancels_safe_automation():
@@ -94,7 +113,7 @@ async def test_shree_identity_has_stable_creator_and_mark_facts():
         assert identity["designation"] == "Mark 12"
         assert identity["creator"]["name"] == "Ayush Keshri"
         assert "designed and built Shree AI" in identity["creator"]["known_fact"]
-        assert identity["runtime_version"] == "1.1.39"
+        assert identity["runtime_version"] == "1.1.48"
 
     from shree.live import _live_config, _live_tools
     instruction = str(_live_config()["system_instruction"])
@@ -262,15 +281,17 @@ def test_live_uses_soft_voice_short_answers_and_optional_current_search():
 
     defaults = ApplicationSettings()
     config = _live_config(runtime=defaults)
-    assert get_settings().gemini_live_model == "gemini-3.1-flash-live-preview"
+    assert get_settings().gemini_live_model == "gemini-2.5-flash-native-audio-latest"
     assert config["speech_config"]["voice_config"]["prebuilt_voice_config"]["voice_name"] == "Aoede"
-    assert "under 60 spoken words" in str(config["system_instruction"])
-    assert config["thinking_config"]["thinking_level"] == "MINIMAL"
-    fallback_config = _live_config(runtime=defaults, model_name="gemini-2.5-flash-native-audio-latest")
-    assert fallback_config["thinking_config"]["thinking_budget"] == 0
+    assert "usually under 25 spoken words" in str(config["system_instruction"])
+    assert "Do not restate the request" in str(config["system_instruction"])
+    assert "never change volume for an application-launch request" in str(config["system_instruction"])
+    assert config["thinking_config"]["thinking_budget"] == 0
+    fallback_config = _live_config(runtime=defaults, model_name="gemini-3.1-flash-live-preview")
+    assert fallback_config["thinking_config"]["thinking_level"] == "MINIMAL"
     vad = config["realtime_input_config"]["automatic_activity_detection"]
-    assert vad["prefix_padding_ms"] == 20
-    assert vad["silence_duration_ms"] == 500
+    assert vad["prefix_padding_ms"] == 40
+    assert vad["silence_duration_ms"] == 420
     instruction = str(config["system_instruction"])
     assert "open Notepad, foreground its window, then type" in instruction
     assert "call getShreeIdentity" in instruction
@@ -526,6 +547,29 @@ def test_private_reasoning_text_is_never_exposed_to_the_renderer():
     assert _public_model_text(SimpleNamespace(text="thought The user wants...", thought=False)) is None
     assert _public_model_text(SimpleNamespace(text="hidden plan", thought=True)) is None
     assert _public_model_text(SimpleNamespace(text="Here is the verified result.", thought=False)) == "Here is the verified result."
+
+
+@pytest.mark.asyncio
+async def test_new_voice_device_replaces_the_previous_live_session():
+    from shree import live
+
+    class FakeSocket:
+        def __init__(self):
+            self.messages = []
+            self.closed = None
+        async def send_json(self, message): self.messages.append(message)
+        async def close(self, **details): self.closed = details
+
+    first, second = FakeSocket(), FakeSocket()
+    first_lease = await live._claim_live_connection(first, "PC")
+    second_lease = await live._claim_live_connection(second, "phone")
+    try:
+        assert first.messages == [{"type": "session_replaced", "text": "Voice continued on phone."}]
+        assert first.closed == {"code": 4001, "reason": "Voice continued on another SHREE device"}
+        await live._release_live_connection(first_lease)
+        assert live._active_live_connection and live._active_live_connection[0] == second_lease
+    finally:
+        await live._release_live_connection(second_lease)
 
 @pytest.mark.asyncio
 async def test_live_receiver_requests_rotation_on_goaway():

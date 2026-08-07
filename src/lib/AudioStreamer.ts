@@ -20,6 +20,7 @@ export class AudioStreamer {
   private reconnecting = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private playbackActive = false;
 
   private static readonly PRE_ROLL_CHUNKS = 3;
 
@@ -28,13 +29,13 @@ export class AudioStreamer {
     onAnalyserCreated?: (analyser: AnalyserNode) => void,
     inputDeviceId: string = "default",
     onMicrophoneProblem?: (message: string | null) => void,
-    _onAudioStreamEnd?: () => void,
+    onAudioStreamEnd?: () => void,
   ) {
     this.onAudioData = onAudioData;
     this.onAnalyserCreated = onAnalyserCreated;
     this.inputDeviceId = inputDeviceId;
     this.onMicrophoneProblem = onMicrophoneProblem;
-    this.onAudioStreamEnd = _onAudioStreamEnd;
+    this.onAudioStreamEnd = onAudioStreamEnd;
   }
 
   async start(): Promise<void> {
@@ -108,6 +109,16 @@ export class AudioStreamer {
 
         const inputData = e.inputBuffer.getChannelData(0);
 
+        // Do not feed SHREE's own speaker output back into Gemini as a second
+        // user turn. Chromium echo cancellation remains enabled, while this
+        // deterministic half-duplex guard prevents the duplicate-assistant
+        // behaviour seen on speakers where acoustic cancellation is weak.
+        if (this.playbackActive) {
+          this.preRollBuffers = [];
+          this.voiceTurnDetector.reset();
+          return;
+        }
+
         // Convert Float32 [-1.0, 1.0] to standard Int16 PCM
         const pcm16 = new Int16Array(inputData.length);
         let peak = 0;
@@ -149,8 +160,6 @@ export class AudioStreamer {
         );
 
         if (voiceEvent === "idle" || voiceEvent === "start") {
-          // Keep a short local look-back so the first syllable is preserved
-          // even though idle room noise is not sent across the WebSocket.
           this.preRollBuffers.push(pcmBuffer);
           if (this.preRollBuffers.length > AudioStreamer.PRE_ROLL_CHUNKS) {
             this.preRollBuffers.shift();
@@ -285,8 +294,17 @@ export class AudioStreamer {
     this.voiceTurnDetector.reset();
   }
 
+  setPlaybackActive(active: boolean): void {
+    this.playbackActive = active;
+    if (active) {
+      this.preRollBuffers = [];
+      this.voiceTurnDetector.reset();
+    }
+  }
+
   stop() {
     this.stopped = true;
+    this.playbackActive = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

@@ -37,7 +37,21 @@ CREATE TABLE IF NOT EXISTS pending_actions (token TEXT PRIMARY KEY, action TEXT 
  risk TEXT NOT NULL, explanation TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
 """
 
-MIGRATIONS = ((1, "initial_shree_schema", SCHEMA),)
+MOBILE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS mobile_devices (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL,
+ paired_at TEXT NOT NULL, last_seen_at TEXT, revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS mobile_pairings (
+ id TEXT PRIMARY KEY, device_id TEXT NOT NULL, requested_name TEXT,
+ status TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+"""
+
+MIGRATIONS = (
+    (1, "initial_shree_schema", SCHEMA),
+    (2, "secure_mobile_companion", MOBILE_SCHEMA),
+)
 
 def utcnow() -> str:
     return datetime.now(UTC).isoformat()

@@ -9,11 +9,11 @@ import { DesktopSettings } from "./components/DesktopSettings";
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import type { UpdateState } from "./updateTypes";
 import { apiFetch, liveWebSocketUrl } from "./lib/api";
+import { mergeTranscriptFragments } from "./lib/transcript";
 import { applyAppearance, defaultSettings, type SetupStatus, type ShreeSettings } from "./settingsTypes";
 import shreeMark from "./assets/branding/shree-mark.png";
 import {
   Mic,
-  MicOff,
   Power,
   Volume2,
   Sparkles,
@@ -77,15 +77,6 @@ const defaultReminderDateTime = () => {
   const date = new Date(Date.now() + 5 * 60_000);
   date.setSeconds(0, 0);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-};
-
-const mergeTranscriptFragments = (current: string, incoming: string) => {
-  const previous = current.trim();
-  const next = incoming.trim();
-  if (!previous) return next;
-  if (!next || previous.endsWith(next)) return previous;
-  if (next.startsWith(previous)) return next;
-  return `${previous} ${next}`.replace(/\s+([,.!?;:])/g, "$1");
 };
 
 // High-fidelity keyframe-animated multi-layered SVG neural wave graph helper
@@ -546,6 +537,7 @@ export default function App() {
                 setOutputAnalyser(analyser);
               },
               (isPlaying) => {
+                streamerRef.current?.setPlaybackActive(isPlaying);
                 // Return to listening state when Shree finishes talking
                 if (!isPlaying && stateRef.current === "speaking") {
                   setAssistantState("listening");
@@ -631,6 +623,7 @@ export default function App() {
           // 2. Received response audio chunk (24kHz)
           if (data.audio) {
             setAssistantState("speaking");
+            streamerRef.current?.setPlaybackActive(true);
             if (playerRef.current) {
               playerRef.current.playChunk(data.audio);
             }
@@ -643,6 +636,14 @@ export default function App() {
             if (playerRef.current) {
               playerRef.current.stopAll();
             }
+            streamerRef.current?.setPlaybackActive(false);
+          }
+
+          if (data.type === "session_replaced") {
+            playerRef.current?.stopAll();
+            streamerRef.current?.setPlaybackActive(false);
+            stopSession(data.message || "Voice moved to another SHREE device.");
+            return;
           }
 
           // 4. Transcription captures

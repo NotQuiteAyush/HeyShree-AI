@@ -5,6 +5,7 @@ export interface ShreeSettings {
   setup_completed: boolean; language: "Auto"|"English"|"Hindi"; theme: "Dark"|"Light"|"Auto"; accent_color: string; animation_speed: "Reduced"|"Normal"|"Fast";
   minimize_to_tray: boolean; start_minimized: boolean; remember_window_position: boolean; check_updates_automatically: boolean; automatic_download_updates:boolean; automatic_install_updates:boolean; update_channel:"stable"|"beta"|"alpha"; notifications_enabled: boolean;
   floating_mode_enabled:boolean; start_in_floating_mode:boolean; floating_always_on_top:boolean; floating_auto_hide_fullscreen:boolean; floating_avatar_size:"Small"|"Medium"|"Large"; floating_opacity:number; floating_click_through_idle:boolean; floating_show_subtitles:boolean; floating_show_speech_bubble:boolean; floating_idle_animations:boolean; floating_lip_sync:boolean; floating_desktop_awareness:boolean; floating_proactive_suggestions:boolean; floating_voice_volume:number; floating_edge_snapping:boolean; floating_animation_quality:"Low"|"Balanced"|"High"; floating_activation_shortcut:string;
+  mobile_remote_access_enabled:boolean; mobile_relay_url:string; mobile_worldwide_migrated:boolean;
   wake_word_enabled: boolean; wake_phrases: string[]; background_listening: boolean;
   reasoning_enabled: boolean; tool_use_enabled: boolean; web_search_enabled:boolean; memory_enabled: boolean; code_execution_enabled: boolean; screen_understanding_enabled: boolean; desktop_control_enabled: boolean; assistant_voice:"Achernar"|"Vindemiatrix"|"Leda"|"Aoede"|"Kore"; v1_1_20_voice_restored:boolean;
   memory_importance_level: Importance;
@@ -24,6 +25,7 @@ export interface SetupStatus {
 export const defaultSettings:ShreeSettings = {
   setup_completed:false,language:"Auto",theme:"Dark",accent_color:"#6EE7FF",animation_speed:"Normal",minimize_to_tray:true,start_minimized:false,remember_window_position:true,check_updates_automatically:true,automatic_download_updates:false,automatic_install_updates:false,update_channel:"stable",notifications_enabled:true,
   floating_mode_enabled:true,start_in_floating_mode:false,floating_always_on_top:true,floating_auto_hide_fullscreen:true,floating_avatar_size:"Medium",floating_opacity:96,floating_click_through_idle:false,floating_show_subtitles:true,floating_show_speech_bubble:true,floating_idle_animations:true,floating_lip_sync:true,floating_desktop_awareness:false,floating_proactive_suggestions:false,floating_voice_volume:82,floating_edge_snapping:true,floating_animation_quality:"Balanced",floating_activation_shortcut:"CommandOrControl+Alt+Space",
+  mobile_remote_access_enabled:true,mobile_relay_url:"https://shree-e2e-relay.shree-e2e-relay.workers.dev",mobile_worldwide_migrated:true,
   wake_word_enabled:false,wake_phrases:["Hello Shree","Hi Shree","Hey Shree","Namaste Shree","Shree"],background_listening:false,
   reasoning_enabled:true,tool_use_enabled:true,web_search_enabled:true,memory_enabled:true,code_execution_enabled:false,screen_understanding_enabled:true,desktop_control_enabled:true,assistant_voice:"Aoede",v1_1_20_voice_restored:true,
   memory_importance_level:"Medium",

@@ -13,7 +13,7 @@ from uuid import uuid4
 import keyring
 import psutil
 from google import genai
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +26,24 @@ from .identity import identity_payload
 from .live import handle_live
 from .mcp import mcp_manager
 from .memory import add_memory, import_memories, list_memories, update_memory
+from .mobile import (
+    PairingDecision,
+    PairingPoll,
+    PairingRequest,
+    PhoneCommand,
+    check_pairing_rate_limit,
+    connection_manager,
+    decide_pairing,
+    handle_control_socket,
+    list_devices,
+    list_pairings,
+    pairing_status,
+    prepare_live_socket,
+    request_pairing,
+    revoke_device,
+    start_pairing,
+)
+from .mobile_relay import relay_manager
 from .models import ApplicationSettings, ConfirmationRequest, DesktopControlSettings, ForgetMemory, McpServerCreate, MemoryCreate, MemoryImport, MemoryUpdate, PermissionUpdate, ReminderCreate, ReminderPatch, SettingValue, SettingsImport, SettingsPatch, SetupComplete, ToolRequest
 from .plugins import discover_plugins, install_plugin_archive, remove_plugin, sdk_manifest_schema
 from .reminders import claim_due_reminders, create_reminder, delete_reminder, list_reminders, update_reminder
@@ -89,8 +107,11 @@ async def restore_mcp_servers() -> None:
 async def lifespan(_: FastAPI):
     await initialize_database()
     await restore_mcp_servers()
+    relay_manager.set_live_handler(lambda websocket: handle_live(websocket, trusted_mobile=True))
+    await relay_manager.restore()
     logger.info("SHREE backend %s started", __version__)
     yield
+    await relay_manager.close()
     await mcp_manager.disconnect_all()
     logger.info("SHREE backend stopped")
 
@@ -99,6 +120,8 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.origins, allow_credent
 
 @app.middleware("http")
 async def require_local_session_token(request, call_next):
+    if request.url.path.startswith("/mobile/pairing/"):
+        return await call_next(request)
     expected = settings.backend_token or ""
     if expected and request.method != "OPTIONS":
         provided = request.headers.get("X-Shree-Token", "")
@@ -471,15 +494,67 @@ async def test_modules():
 async def about():
     status = await setup_status()
     return {
-        **identity_payload(__version__), "version": __version__, "build": "2026.07.29",
+        **identity_payload(__version__), "version": __version__, "build": "2026.08.05",
         "license": "Proprietary — all rights reserved", "credits": "Created by Ayush",
-        "installed_modules": ["Gemini Live", "Windows Desktop Tools", "Memory", "Reminders", "Plugins", "MCP"],
+        "installed_modules": ["Gemini Live", "Windows Desktop Tools", "Android Companion", "Memory", "Reminders", "Plugins", "MCP"],
         "connected_providers": [name for name, provider in status["providers"].items() if provider["configured"]],
     }
 
 @app.get("/api/identity")
 async def identity():
     return identity_payload(__version__)
+
+@app.post("/api/mobile/pairing/start")
+async def create_mobile_pairing():
+    return await start_pairing()
+
+@app.get("/api/mobile/pairings")
+async def get_mobile_pairings():
+    return await list_pairings()
+
+@app.post("/api/mobile/pairings/{pairing_id}/decision")
+async def set_mobile_pairing_decision(pairing_id: str, item: PairingDecision):
+    return await decide_pairing(pairing_id, item.approved)
+
+@app.get("/api/mobile/devices")
+async def get_mobile_devices():
+    return await list_devices()
+
+@app.delete("/api/mobile/devices/{device_id}")
+async def delete_mobile_device(device_id: str):
+    if not await revoke_device(device_id):
+        raise HTTPException(404, "Paired phone not found")
+    return {"revoked": True}
+
+@app.post("/api/mobile/devices/{device_id}/command")
+async def send_mobile_command(device_id: str, item: PhoneCommand):
+    return await connection_manager.command(device_id, item)
+
+@app.post("/mobile/pairing/request")
+async def mobile_pairing_request(item: PairingRequest, request: Request):
+    check_pairing_rate_limit(request.client.host if request.client else "unknown")
+    return await request_pairing(item)
+
+@app.post("/mobile/pairing/status")
+async def mobile_pairing_status(item: PairingPoll, request: Request):
+    check_pairing_rate_limit(request.client.host if request.client else "unknown")
+    return await pairing_status(item)
+
+@app.websocket("/mobile/control/{device_id}")
+async def mobile_control_socket(websocket: WebSocket, device_id: str):
+    await handle_control_socket(websocket, device_id)
+
+@app.websocket("/mobile/live/{device_id}")
+async def mobile_live_socket(websocket: WebSocket, device_id: str):
+    try:
+        encrypted_socket = await prepare_live_socket(websocket, device_id)
+        await handle_live(encrypted_socket, trusted_mobile=True)
+    except Exception as error:
+        logger.warning("Rejected mobile voice connection for %s: %s", device_id, error)
+        try:
+            await websocket.close(code=1008, reason="Mobile device authentication failed")
+        except Exception:
+            pass
 
 @app.websocket("/live")
 async def live_socket(websocket: WebSocket): await handle_live(websocket)

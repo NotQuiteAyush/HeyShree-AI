@@ -34,6 +34,8 @@ declare global {
       skipUpdateVersion(): Promise<import("./updateTypes").UpdateState>;
       setUpdateChannel(channel: "stable" | "beta" | "alpha"): Promise<import("./updateTypes").UpdateState>;
       restart(): Promise<boolean>;
+      getMobileFirewallStatus(): Promise<{ supported: boolean; allowed: boolean; port: number }>;
+      allowMobileFirewall(): Promise<{ supported: boolean; allowed: boolean; port: number }>;
       onOpenSettings(listener: (payload?: {section?: "settings"|"updates"}) => void): () => void;
       onOpenMemory(listener: () => void): () => void;
       onOpenReminders(listener: () => void): () => void;

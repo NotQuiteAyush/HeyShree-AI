@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - SHREE is packaged for Windows
 
 _PREFIX = "dpapi:"
 _PLAINTEXT_KEYS = {"encrypt_saved_settings"}
+_DEFAULT_MOBILE_RELAY_URL = "https://shree-e2e-relay.shree-e2e-relay.workers.dev"
 
 
 def encryption_available() -> bool:
@@ -55,6 +56,12 @@ async def get_stored_settings() -> dict[str, Any]:
 
 async def get_application_settings() -> ApplicationSettings:
     stored = await get_stored_settings()
+    # Upgrade local-only companion installations once. The marker preserves a
+    # user's later choice to turn worldwide access back off.
+    if not stored.get("mobile_worldwide_migrated", False):
+        stored["mobile_remote_access_enabled"] = True
+        stored["mobile_relay_url"] = _DEFAULT_MOBILE_RELAY_URL
+        stored["mobile_worldwide_migrated"] = True
     # Migrate the pre-1.1.15 shutdown-only switch into the unified power and
     # session control switch without enabling anything for existing users who
     # had shutdown disabled.

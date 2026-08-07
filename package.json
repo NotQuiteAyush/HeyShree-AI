@@ -1,7 +1,7 @@
 {
   "name": "shree-desktop-ai",
   "private": true,
-  "version": "1.1.39",
+  "version": "1.1.48",
   "type": "module",
   "description": "Shree Mark 12 secure Windows desktop AI assistant",
   "author": "Ayush",
@@ -10,26 +10,29 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:backend\" \"npm:dev:web\" \"npm:dev:electron\"",
-    "dev:backend": "uv run --project backend uvicorn shree.main:app --host 127.0.0.1 --port 8765 --reload",
+    "dev:backend": "uv run --project backend uvicorn shree.main:app --host 0.0.0.0 --port 8765 --reload",
     "dev:web": "vite --host 127.0.0.1 --port 5173",
     "dev:electron": "wait-on http://127.0.0.1:5173 http://127.0.0.1:8765/api/health && cross-env SHREE_DEV_URL=http://127.0.0.1:5173 SHREE_BACKEND_URL=http://127.0.0.1:8765 electron .",
     "build": "vite build",
     "start": "electron .",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
-    "test:voice": "tsx scripts/test-voice-turn-detector.ts",
+    "test:voice": "tsx scripts/test-voice-turn-detector.ts && tsx scripts/test-transcript-merging.ts",
     "test:updater": "node scripts/test-updater.cjs",
     "test:backend": "uv run --project backend pytest",
     "version:check": "node scripts/check-version.mjs",
-    "release:verify": "npm run version:check && npm run lint && npm run test:voice && npm run test:updater && npm run test:backend",
+    "release:verify": "npm run version:check && npm run lint && npm run test:voice && npm run test:updater && npm run test:relay && npm run test:backend",
+    "test:relay": "npm --prefix relay-worker run check",
     "build:backend": "uv run --project backend pyinstaller --noconfirm --clean --onefile --name shree-backend --distpath backend-dist --workpath backend/.build --specpath backend/.build --collect-all google.genai --collect-all keyring --collect-all uvicorn backend/run.py",
     "build:desktop": "npm run build",
     "package:win": "npm run build && npm run build:backend && electron-builder --win nsis"
   },
   "dependencies": {
+    "@types/qrcode": "^1.5.6",
     "builder-util-runtime": "9.7.0",
     "electron-log": "^5.4.3",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@google/genai": "^2.4.0",
@@ -38,12 +41,12 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "electron": "^43.1.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "dotenv": "^17.2.3",
+    "electron": "^43.1.0",
     "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
@@ -51,8 +54,8 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "wait-on": "^9.0.1",
     "vite": "^6.2.3",
+    "wait-on": "^9.0.1",
     "ws": "^8.21.0"
   },
   "overrides": {
@@ -76,7 +79,7 @@
       }
     ],
     "directories": {
-      "output": "release-1.1.39",
+      "output": "release-1.1.48",
       "buildResources": "build"
     },
     "publish": [
