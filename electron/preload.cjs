@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('shreeDesktop', {
   skipUpdateVersion: () => ipcRenderer.invoke('app:skip-update-version'),
   setUpdateChannel: (channel) => ipcRenderer.invoke('app:set-update-channel', channel),
   restart: () => ipcRenderer.invoke('app:restart'),
+  getMobileFirewallStatus: () => ipcRenderer.invoke('mobile:firewall-status'),
+  allowMobileFirewall: () => ipcRenderer.invoke('mobile:allow-firewall'),
   onOpenSettings: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('app:open-settings', handler);

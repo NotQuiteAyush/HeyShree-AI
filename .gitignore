@@ -24,6 +24,12 @@ SHREE-PUBLIC-*/
 *.lnk
 .DS_Store
 *.log
+android-companion/.gradle/
+android-companion/local.properties
+android-companion/**/build/
+android-companion/*.jks
+android-companion/*.keystore
+.android-toolchain/
 .env*
 !.env.example
 memories.json

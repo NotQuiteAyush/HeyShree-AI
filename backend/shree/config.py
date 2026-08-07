@@ -11,8 +11,12 @@ class Settings(BaseSettings):
     port: int = 8765
     # Use Google's current low-latency Live model first, matching the original
     # v1.1.20 connection order. Keep 2.5 native audio as the quota fallback.
-    gemini_live_model: str = "gemini-3.1-flash-live-preview"
-    gemini_live_fallback_model: str = "gemini-2.5-flash-native-audio-latest"
+    # The native-audio Flash model has the lowest conversational latency and
+    # was the stable voice path used by the earlier SHREE releases. Keep the
+    # newer preview as a compatibility fallback instead of paying its extra
+    # response delay on every normal turn.
+    gemini_live_model: str = "gemini-2.5-flash-native-audio-latest"
+    gemini_live_fallback_model: str = "gemini-3.1-flash-live-preview"
     data_dir: Path = Path.home() / "AppData" / "Local" / "SHREE"
     log_level: str = "INFO"
     allowed_origins: str = "http://127.0.0.1:5173,http://localhost:5173,null"

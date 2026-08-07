@@ -140,6 +140,11 @@ class ApplicationSettings(BaseModel):
     floating_animation_quality: Literal["Low", "Balanced", "High"] = "Balanced"
     floating_activation_shortcut: str = Field(default="CommandOrControl+Alt+Space", min_length=3, max_length=100)
 
+    # Android companion connectivity
+    mobile_remote_access_enabled: bool = True
+    mobile_relay_url: str = Field(default="https://shree-e2e-relay.shree-e2e-relay.workers.dev", max_length=500)
+    mobile_worldwide_migrated: bool = False
+
     # Wake word and AI
     wake_word_enabled: bool = False
     wake_phrases: list[str] = Field(default_factory=lambda: ["Hello Shree", "Hi Shree", "Hey Shree", "Namaste Shree", "Shree"], max_length=10)
@@ -205,6 +210,14 @@ class ApplicationSettings(BaseModel):
         if len(value) != 7 or not value.startswith("#") or any(char not in "0123456789abcdefABCDEF" for char in value[1:]):
             raise ValueError("Accent color must be a six-digit hex color")
         return value.upper()
+
+    @field_validator("mobile_relay_url")
+    @classmethod
+    def validate_mobile_relay_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        if normalized and not normalized.startswith("https://"):
+            raise ValueError("Mobile relay URL must use HTTPS")
+        return normalized
 
     @field_validator("wake_phrases")
     @classmethod

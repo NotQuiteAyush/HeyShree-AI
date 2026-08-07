@@ -1,6 +1,6 @@
 [project]
 name = "shree-backend"
-version = "1.1.39"
+version = "1.1.47"
 description = "Secure local FastAPI backend for Shree Mark 12"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
   "mss>=10,<11",
   "pillow>=12.3,<13",
   "keyring>=25.6,<26",
+  "cryptography>=45,<47",
   "pycaw>=20251023,<20270000",
   "comtypes>=1.4,<2",
   "pywinauto>=0.6.9,<1",

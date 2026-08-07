@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">SHREE Companion</string>
+    <string name="accessibility_description">Optional screen interaction for commands that Android does not expose through an official API. SHREE asks before sensitive actions.</string>
+</resources>

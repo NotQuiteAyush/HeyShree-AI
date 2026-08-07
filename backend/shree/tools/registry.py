@@ -18,6 +18,7 @@ from .screen import CaptureScreenParams,InspectScreenParams,capture_screen,inspe
 from .system import EmptyParams as SystemEmptyParams,ShutdownParams,WindowsSettingParams,cancel_power_action,cancel_shutdown,change_windows_setting,get_system_status,hibernate_system,lock_workstation,restart_system,shutdown_system,sign_out_user,sleep_system,switch_user
 from .media import MediaActionParams,media_action
 from .memory_control import DeleteMemoryParams,delete_memory
+from .mobile_phone import PhoneActionParams,phone_action
 from ..database import connect,utcnow
 from ..settings_store import get_setting
 
@@ -202,3 +203,4 @@ add("hibernate_system","Hibernate this computer after explicit confirmation when
 add("cancel_power_action","Cancel a pending SHREE Windows shutdown or restart",PermissionLevel.SAFE,SystemEmptyParams,cancel_power_action,15,"power_control")
 add("cancel_shutdown","Backward-compatible alias that cancels a pending SHREE Windows shutdown or restart",PermissionLevel.SAFE,SystemEmptyParams,cancel_shutdown,15,"power_control")
 add("delete_memory","Delete a selected long-term memory after explicit confirmation",PermissionLevel.DESTRUCTIVE,DeleteMemoryParams,delete_memory,15,"memory")
+add("phone_action","Control the paired Android phone over its end-to-end encrypted companion link, locally or through the worldwide relay. Calls, messages, sensitive typing, deletion, installation, and account changes are confirmed on the phone before execution",PermissionLevel.SAFE,PhoneActionParams,phone_action,40,"mobile_control")

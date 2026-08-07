@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   Sparkles,
   SquareTerminal,
+  Smartphone,
   Trash2,
   Upload,
   Volume2,
@@ -44,6 +45,7 @@ import {
 import type { Memory } from "../types";
 import type { UpdateState, UpdateChannel } from "../updateTypes";
 import shreeMark from "../assets/branding/shree-mark.png";
+import { MobileCompanionSettings } from "./MobileCompanionSettings";
 
 interface Props {
   onClose(): void;
@@ -81,6 +83,7 @@ type Category =
   | "general"
   | "updates"
   | "floating"
+  | "mobile"
   | "api"
   | "wake"
   | "ai"
@@ -115,6 +118,12 @@ const categories: Array<{
     label: "Floating Companion",
     icon: Sparkles,
     keywords: "avatar companion always top fullscreen opacity subtitles lip sync awareness snap shortcut",
+  },
+  {
+    id: "mobile",
+    label: "Android Companion",
+    icon: Smartphone,
+    keywords: "phone android mobile pairing qr wifi remote voice control",
   },
   {
     id: "api",
@@ -1916,6 +1925,7 @@ export function DesktopSettings({
     general,
     updates,
     floating,
+    mobile: <MobileCompanionSettings notify={setMessage} values={values} persist={persist} />,
     api,
     wake,
     ai,

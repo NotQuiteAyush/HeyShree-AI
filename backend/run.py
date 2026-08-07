@@ -21,4 +21,4 @@ if __name__ == "__main__":
     if "--purge-user-data" in sys.argv:
         raise SystemExit(purge_user_data())
     from shree.main import app
-    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("SHREE_BACKEND_PORT", "8765")), log_level="info")
+    uvicorn.run(app, host=os.environ.get("SHREE_BACKEND_HOST", "127.0.0.1"), port=int(os.environ.get("SHREE_BACKEND_PORT", "8765")), log_level="info")

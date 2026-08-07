@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shree-e2e-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "durable_objects": {
+    "bindings": [{ "name": "SHREE_ROOMS", "class_name": "ShreeRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ShreeRoom"] }]
+}
