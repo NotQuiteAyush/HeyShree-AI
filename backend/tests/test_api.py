@@ -113,7 +113,7 @@ async def test_shree_identity_has_stable_creator_and_mark_facts():
         assert identity["designation"] == "Mark 12"
         assert identity["creator"]["name"] == "Ayush Keshri"
         assert "designed and built Shree AI" in identity["creator"]["known_fact"]
-        assert identity["runtime_version"] == "1.1.47"
+        assert identity["runtime_version"] == "1.1.48"
 
     from shree.live import _live_config, _live_tools
     instruction = str(_live_config()["system_instruction"])

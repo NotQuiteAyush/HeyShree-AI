@@ -15,7 +15,7 @@ class McpProcess:
         self.process = await asyncio.create_subprocess_exec(self.command, *self.args, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={**os.environ, **self.env},
             creationflags=0x08000000 if os.name == "nt" else 0)
-        await self.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "shree", "version": "1.1.47"}})
+        await self.request("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "shree", "version": "1.1.48"}})
         await self.notify("notifications/initialized", {})
 
     async def request(self, method: str, params: dict[str, Any]) -> Any:
