@@ -1,27 +1,37 @@
-export type VoiceTurnEvent = "idle" | "start" | "active" | "end";
+export type VoiceTurnEvent = "idle" | "candidate" | "rejected" | "start" | "active" | "end";
 
 export class VoiceTurnDetector {
-  // Preserve a natural breathing pause without returning to the multi-second
-  // lag of older builds. Gemini receives the end marker after a genuine pause.
-  // At 16 kHz with 1024-sample frames this resolves after seven silent
-  // frames (about 448 ms): fast enough to feel conversational while still
-  // allowing short natural pauses between words.
-  static readonly END_OF_SPEECH_SILENCE_MS = 420;
-  static readonly SPEECH_RMS_THRESHOLD = 0.006;
-  static readonly SPEECH_PEAK_THRESHOLD = 0.025;
+  // A short human breathing pause should not split one sentence. This remains
+  // far below the multi-second lag of old builds while allowing natural speech.
+  static readonly END_OF_SPEECH_SILENCE_MS = 700;
+  static readonly MINIMUM_SPEECH_MS = 150;
+  static readonly SPEECH_RMS_THRESHOLD = 0.0045;
+  static readonly SPEECH_PEAK_THRESHOLD = 0.018;
 
   private active = false;
   private silentSamples = 0;
+  private candidateSamples = 0;
+  private noiseFloorRms = 0.0015;
 
   update(peak: number, rms: number, sampleCount: number, sampleRate: number): VoiceTurnEvent {
-    const speechDetected =
-      peak >= VoiceTurnDetector.SPEECH_PEAK_THRESHOLD
-      || rms >= VoiceTurnDetector.SPEECH_RMS_THRESHOLD;
+    const rmsThreshold = Math.max(VoiceTurnDetector.SPEECH_RMS_THRESHOLD, this.noiseFloorRms * 1.8);
+    const peakThreshold = Math.max(VoiceTurnDetector.SPEECH_PEAK_THRESHOLD, this.noiseFloorRms * 4.5);
+    const speechDetected = peak >= peakThreshold && rms >= rmsThreshold;
 
     if (!this.active) {
-      if (!speechDetected) return "idle";
+      if (!speechDetected) {
+        const rejected = this.candidateSamples > 0;
+        this.candidateSamples = 0;
+        // Slow adaptation follows fans/AC without letting a sudden spike raise
+        // the threshold enough to mask the next spoken word.
+        this.noiseFloorRms = this.noiseFloorRms * 0.98 + Math.min(rms, 0.02) * 0.02;
+        return rejected ? "rejected" : "idle";
+      }
+      this.candidateSamples += sampleCount;
+      if (this.candidateSamples * 1000 / sampleRate < VoiceTurnDetector.MINIMUM_SPEECH_MS) return "candidate";
       this.active = true;
       this.silentSamples = 0;
+      this.candidateSamples = 0;
       return "start";
     }
 
@@ -37,11 +47,13 @@ export class VoiceTurnDetector {
 
     this.active = false;
     this.silentSamples = 0;
+    this.candidateSamples = 0;
     return "end";
   }
 
   reset(): void {
     this.active = false;
     this.silentSamples = 0;
+    this.candidateSamples = 0;
   }
 }

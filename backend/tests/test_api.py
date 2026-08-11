@@ -36,6 +36,8 @@ async def test_worldwide_mobile_relay_is_enabled_once_and_respects_opt_out():
     assert settings.mobile_remote_access_enabled is True
     assert settings.mobile_relay_url == "https://shree-e2e-relay.shree-e2e-relay.workers.dev"
     assert settings.mobile_worldwide_migrated is True
+    assert settings.assistant_voice == "Achernar"
+    assert settings.soft_voice_migrated is True
 
     await update_application_settings({"mobile_remote_access_enabled": False})
     settings = await get_application_settings()
@@ -113,7 +115,7 @@ async def test_shree_identity_has_stable_creator_and_mark_facts():
         assert identity["designation"] == "Mark 12"
         assert identity["creator"]["name"] == "Ayush Keshri"
         assert "designed and built Shree AI" in identity["creator"]["known_fact"]
-        assert identity["runtime_version"] == "1.1.48"
+        assert identity["runtime_version"] == "1.1.52"
 
     from shree.live import _live_config, _live_tools
     instruction = str(_live_config()["system_instruction"])
@@ -282,7 +284,7 @@ def test_live_uses_soft_voice_short_answers_and_optional_current_search():
     defaults = ApplicationSettings()
     config = _live_config(runtime=defaults)
     assert get_settings().gemini_live_model == "gemini-2.5-flash-native-audio-latest"
-    assert config["speech_config"]["voice_config"]["prebuilt_voice_config"]["voice_name"] == "Aoede"
+    assert config["speech_config"]["voice_config"]["prebuilt_voice_config"]["voice_name"] == "Achernar"
     assert "usually under 25 spoken words" in str(config["system_instruction"])
     assert "Do not restate the request" in str(config["system_instruction"])
     assert "never change volume for an application-launch request" in str(config["system_instruction"])
@@ -290,8 +292,8 @@ def test_live_uses_soft_voice_short_answers_and_optional_current_search():
     fallback_config = _live_config(runtime=defaults, model_name="gemini-3.1-flash-live-preview")
     assert fallback_config["thinking_config"]["thinking_level"] == "MINIMAL"
     vad = config["realtime_input_config"]["automatic_activity_detection"]
-    assert vad["prefix_padding_ms"] == 40
-    assert vad["silence_duration_ms"] == 420
+    assert vad["prefix_padding_ms"] == 80
+    assert vad["silence_duration_ms"] == 700
     instruction = str(config["system_instruction"])
     assert "open Notepad, foreground its window, then type" in instruction
     assert "call getShreeIdentity" in instruction
@@ -299,6 +301,9 @@ def test_live_uses_soft_voice_short_answers_and_optional_current_search():
     normalized = _normalize_user_transcript("ہیلو، آپ کیسے ہیں؟")
     assert normalized and "?" in normalized
     assert not any("\u0600" <= character <= "\u06ff" for character in normalized)
+    hindi = _normalize_user_transcript("क्या कर रही हो?")
+    assert hindi == "kya kar rahi ho?"
+    assert not any("\u0900" <= character <= "\u097f" for character in hindi)
     enabled = _live_tools(defaults)
     disabled = _live_tools(ApplicationSettings(web_search_enabled=False))
     local = _live_tools(ApplicationSettings(local_only_mode=True))
@@ -320,7 +325,93 @@ def test_manual_activation_does_not_wait_for_a_wake_phrase():
     ))["system_instruction"])
     assert "Respond normally without waiting for a wake phrase" in manual
     assert "Remain silent until the user says" not in manual
-    assert "Remain silent until the user says" in background
+    assert "server owns its safety gate" in background
+
+def test_latin_display_preserves_code_urls_and_romanizes_hindi():
+    from shree.text_display import contains_devanagari, to_latin_display
+
+    assert to_latin_display("मुझे Chrome खोलो") == "mujhe Chrome kholo"
+    assert to_latin_display("हाँ, Chrome खोल दिया।") == "haan, Chrome khol diya."
+    protected = "Open `const नाम = 3` at https://example.com/हिंदी"
+    assert to_latin_display(protected) == protected
+    assert contains_devanagari(to_latin_display("बोलो Shree")) is False
+    assert to_latin_display("کیا کر رہی ہو؟") == "kya kar rahi ho?"
+    assert to_latin_display("مجھے Chrome کھولو") == "mujhe Chrome kholo"
+    assert not any("\u0600" <= character <= "\u06ff" for character in to_latin_display("شری"))
+    assert to_latin_display("మూడు 3") == "three 3"
+    assert to_latin_display("పరీక్ష") == ""
+
+def test_wake_gate_handles_phonetic_three_once_and_keeps_number_three():
+    from shree.wake_word import WakeWordGate
+
+    gate = WakeWordGate(True, True, ["Hey Shree", "Shree"])
+    rejected = gate.inspect("I need three files", now=1.0)
+    assert rejected.active is False and rejected.accepted is False
+    numeric_prefix = gate.inspect("three files are open", now=1.5)
+    assert numeric_prefix.active is False and numeric_prefix.accepted is False
+
+    accepted = gate.inspect("three", now=2.0)
+    assert accepted.accepted is True and accepted.active is True
+    duplicate = gate.inspect("three", now=2.1)
+    assert duplicate.duplicate is True
+
+    active_number = gate.inspect("set volume to three", now=2.2)
+    assert active_number.active is True and active_number.duplicate is False
+
+    urdu_transcription = WakeWordGate(True, True, ["Shree"]).inspect("shry")
+    assert urdu_transcription.accepted is True
+
+    numeric_stt = WakeWordGate(True, True, ["Shree"]).inspect("three 3")
+    assert numeric_stt.accepted is True and numeric_stt.command == ""
+
+def test_wake_gate_separates_wake_phrase_and_inline_command():
+    from shree.wake_word import WakeWordGate
+
+    gate = WakeWordGate(True, True, ["Hey Shree", "Namaste Shree", "Shree"])
+    result = gate.inspect("Hey Sree, open YouTube", now=10.0)
+    assert result.accepted is True
+    assert result.command == "open youtube"
+    assert gate.inspect("Hey Sree", now=10.1).active is True
+
+def test_wake_gate_combines_fragmented_custom_phrase_once():
+    from shree.wake_word import WakeWordGate
+
+    gate = WakeWordGate(True, True, ["Hello Nova"])
+    partial = gate.inspect("Hello", now=10.0)
+    assert partial.accepted is False and partial.active is False
+    accepted = gate.inspect("Nova", now=10.3)
+    assert accepted.accepted is True and accepted.phrase == "Hello Nova"
+
+    gate.sleep()
+    cumulative = gate.inspect("Hello", now=20.0)
+    assert cumulative.accepted is False
+    accepted_cumulative = gate.inspect("Hello Nova open Chrome", now=20.2)
+    assert accepted_cumulative.accepted is True
+    assert accepted_cumulative.command == "open chrome"
+
+def test_auto_sleep_settings_defaults_and_validation():
+    from pydantic import ValidationError
+    from shree.models import ApplicationSettings
+
+    defaults = ApplicationSettings()
+    assert defaults.auto_sleep_enabled is True
+    assert defaults.auto_sleep_timeout_seconds == 15
+    assert ApplicationSettings(auto_sleep_timeout_seconds=12).auto_sleep_timeout_seconds == 12
+    with pytest.raises(ValidationError):
+        ApplicationSettings(auto_sleep_timeout_seconds=0)
+    with pytest.raises(ValidationError):
+        ApplicationSettings(auto_sleep_timeout_seconds=3601)
+
+@pytest.mark.asyncio
+async def test_auto_sleep_settings_persist_across_settings_reload():
+    from shree.database import initialize_database
+    from shree.settings_store import get_application_settings, update_application_settings
+
+    await initialize_database()
+    await update_application_settings({"auto_sleep_enabled": False, "auto_sleep_timeout_seconds": 20})
+    reloaded = await get_application_settings()
+    assert reloaded.auto_sleep_enabled is False
+    assert reloaded.auto_sleep_timeout_seconds == 20
 
 def test_quota_errors_are_mapped_to_safe_actionable_guidance():
     from shree.live import _is_quota_error, _public_live_error

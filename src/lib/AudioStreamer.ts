@@ -10,6 +10,9 @@ export class AudioStreamer {
   private onAnalyserCreated?: (analyser: AnalyserNode) => void;
   private onMicrophoneProblem?: (message: string | null) => void;
   private onAudioStreamEnd?: () => void;
+  private onGenuineSpeech?: () => void;
+  private onPotentialSpeech?: () => void;
+  private onSpeechRejected?: () => void;
   private analyser: AnalyserNode | null = null;
   private inputDeviceId: string;
   private zeroSampleCount = 0;
@@ -21,6 +24,8 @@ export class AudioStreamer {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private playbackActive = false;
+  private wakeWordMode = false;
+  private playbackReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
   private static readonly PRE_ROLL_CHUNKS = 3;
 
@@ -30,12 +35,18 @@ export class AudioStreamer {
     inputDeviceId: string = "default",
     onMicrophoneProblem?: (message: string | null) => void,
     onAudioStreamEnd?: () => void,
+    onGenuineSpeech?: () => void,
+    onPotentialSpeech?: () => void,
+    onSpeechRejected?: () => void,
   ) {
     this.onAudioData = onAudioData;
     this.onAnalyserCreated = onAnalyserCreated;
     this.inputDeviceId = inputDeviceId;
     this.onMicrophoneProblem = onMicrophoneProblem;
     this.onAudioStreamEnd = onAudioStreamEnd;
+    this.onGenuineSpeech = onGenuineSpeech;
+    this.onPotentialSpeech = onPotentialSpeech;
+    this.onSpeechRejected = onSpeechRejected;
   }
 
   async start(): Promise<void> {
@@ -152,6 +163,17 @@ export class AudioStreamer {
         }
 
         const pcmBuffer = pcm16.buffer.slice(0) as ArrayBuffer;
+
+        // A wake phrase is often too short for the conversation VAD to admit
+        // reliably, especially when the first consonant is quiet. While Shree
+        // is sleeping, forward the complete microphone stream and let
+        // Gemini's server-side high-sensitivity VAD identify the utterance.
+        // Active conversation continues to use the local noise/turn gate.
+        if (this.wakeWordMode) {
+          this.onAudioData(this.bufferToBase64(pcmBuffer));
+          return;
+        }
+
         const voiceEvent = this.voiceTurnDetector.update(
           peak,
           this.rms(inputData),
@@ -159,12 +181,20 @@ export class AudioStreamer {
           this.audioContext.sampleRate,
         );
 
-        if (voiceEvent === "idle" || voiceEvent === "start") {
+        if (voiceEvent === "candidate") this.onPotentialSpeech?.();
+        if (voiceEvent === "rejected") {
+          this.preRollBuffers = [];
+          this.onSpeechRejected?.();
+          return;
+        }
+
+        if (voiceEvent === "idle" || voiceEvent === "candidate" || voiceEvent === "start") {
           this.preRollBuffers.push(pcmBuffer);
           if (this.preRollBuffers.length > AudioStreamer.PRE_ROLL_CHUNKS) {
             this.preRollBuffers.shift();
           }
           if (voiceEvent === "start") {
+            this.onGenuineSpeech?.();
             for (const buffered of this.preRollBuffers) {
               this.onAudioData(this.bufferToBase64(buffered));
             }
@@ -295,16 +325,40 @@ export class AudioStreamer {
   }
 
   setPlaybackActive(active: boolean): void {
-    this.playbackActive = active;
+    if (this.playbackReleaseTimer) {
+      clearTimeout(this.playbackReleaseTimer);
+      this.playbackReleaseTimer = null;
+    }
     if (active) {
+      this.playbackActive = true;
       this.preRollBuffers = [];
       this.voiceTurnDetector.reset();
+      return;
     }
+    // Keep the gate closed briefly for speaker/room echo after playback ends.
+    this.playbackReleaseTimer = setTimeout(() => {
+      this.playbackReleaseTimer = null;
+      this.playbackActive = false;
+      this.voiceTurnDetector.reset();
+    }, 400);
+  }
+
+  setWakeWordMode(active: boolean): void {
+    if (this.wakeWordMode === active) return;
+    this.wakeWordMode = active;
+    this.preRollBuffers = [];
+    this.voiceTurnDetector.reset();
+    console.info(`[WakeWord] Microphone wake mode ${active ? "enabled" : "disabled"}`);
   }
 
   stop() {
     this.stopped = true;
     this.playbackActive = false;
+    this.wakeWordMode = false;
+    if (this.playbackReleaseTimer) {
+      clearTimeout(this.playbackReleaseTimer);
+      this.playbackReleaseTimer = null;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

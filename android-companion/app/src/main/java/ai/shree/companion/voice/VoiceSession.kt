@@ -103,6 +103,11 @@ class VoiceSession(private val context: Context, private val credentials: Pairin
             try {
                 while (socket.state.value == "connecting" && isActive) delay(30)
                 check(socket.state.value == "connected") { socket.state.value.substringAfter(":", "The PC voice link did not connect").trim() }
+                // Tapping Voice is an explicit manual activation. Do not leave
+                // the shared backend in desktop background wake-only mode.
+                check(socket.send(WireMessage(type = "voice_mode", text = "active"))) {
+                    "The voice activation request did not reach SHREE"
+                }
                 val minimum = AudioRecord.getMinBufferSize(16_000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 check(minimum > 0) { "This microphone does not support 16 kHz voice capture" }
                 val input = AudioRecord(
@@ -143,6 +148,28 @@ class VoiceSession(private val context: Context, private val credentials: Pairin
                 if (isActive) status.value = "error: ${error.message ?: "Microphone capture failed"}"
             }
         }
+    }
+
+    fun startText(text: String) {
+        check(!stopped.get()) { "This SHREE session has ended" }
+        socket.connect()
+        scope.launch {
+            while (socket.state.value == "connecting" && isActive) delay(30)
+            if (socket.state.value != "connected") {
+                status.value = "error: ${socket.state.value.substringAfter(":", "The PC link did not connect").trim()}"
+                return@launch
+            }
+            socket.send(WireMessage(type = "voice_mode", text = "active"))
+            if (!sendText(text)) status.value = "error: Text command did not reach SHREE"
+        }
+    }
+
+    fun sendText(text: String): Boolean {
+        val value = text.trim()
+        if (value.isEmpty() || socket.state.value != "connected") return false
+        status.value = "thinking"
+        CompanionData.consume(WireMessage(type = "text_input", role = "user", text = value))
+        return socket.send(WireMessage(type = "text_input", text = value))
     }
 
     fun stop() {

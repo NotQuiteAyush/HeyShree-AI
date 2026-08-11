@@ -34,7 +34,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var voiceStatusJob: Job? = null
     private var transcriptJob: Job? = null
 
-    init { if (paired.value) startLink() }
+    init {
+        CompanionData.initialize(application)
+        if (paired.value) startLink()
+    }
 
     fun pair(qr: String) = viewModelScope.launch {
         runCatching {
@@ -56,6 +59,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ShreeLinkService.send(WireMessage(type = "update_reminder", reminderId = id, patch = ReminderUpdate(completed)))
     }
     fun deleteReminder(id: String) { ShreeLinkService.send(WireMessage(type = "delete_reminder", reminderId = id)) }
+
+    fun sendText(text: String) {
+        val value = text.trim()
+        if (value.isEmpty()) return
+        val existing = voice
+        if (existing != null) {
+            if (!existing.sendText(value)) voiceStatus.value = "error: Start a new SHREE session and try again"
+            return
+        }
+        val credentials = store.load() ?: return
+        runCatching {
+            VoiceSession(getApplication(), credentials).also { session ->
+                voice = session
+                voiceStatusJob = viewModelScope.launch { session.status.collect { voiceStatus.value = it } }
+                transcriptJob = viewModelScope.launch { session.transcript.collect { transcript.value = it } }
+                session.startText(value)
+            }
+        }.onFailure { voiceStatus.value = "error: ${it.message}" }
+    }
 
     fun toggleVoice() {
         if (voice != null) {

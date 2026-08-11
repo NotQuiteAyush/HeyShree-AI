@@ -149,6 +149,8 @@ class ApplicationSettings(BaseModel):
     wake_word_enabled: bool = False
     wake_phrases: list[str] = Field(default_factory=lambda: ["Hello Shree", "Hi Shree", "Hey Shree", "Namaste Shree", "Shree"], max_length=10)
     background_listening: bool = False
+    auto_sleep_enabled: bool = True
+    auto_sleep_timeout_seconds: int = Field(default=15, ge=1, le=3600)
     reasoning_enabled: bool = True
     tool_use_enabled: bool = True
     web_search_enabled: bool = True
@@ -156,8 +158,9 @@ class ApplicationSettings(BaseModel):
     code_execution_enabled: bool = False
     screen_understanding_enabled: bool = True
     desktop_control_enabled: bool = True
-    assistant_voice: Literal["Achernar", "Vindemiatrix", "Leda", "Aoede", "Kore"] = "Aoede"
+    assistant_voice: Literal["Achernar", "Vindemiatrix", "Leda", "Aoede", "Kore"] = "Achernar"
     v1_1_20_voice_restored: bool = False
+    soft_voice_migrated: bool = True
 
     # Memory
     memory_importance_level: Importance = "Medium"
