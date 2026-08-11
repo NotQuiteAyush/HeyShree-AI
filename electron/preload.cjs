@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('shreeDesktop', {
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('app:launch-at-login', Boolean(enabled)),
   getLaunchAtLogin: () => ipcRenderer.invoke('app:get-launch-at-login'),
   showNotification: (title, body) => ipcRenderer.invoke('app:notify', { title, body }),
+  bringToForegroundOnWake: () => ipcRenderer.invoke('app:wake-foreground'),
   minimizeToTray: () => ipcRenderer.invoke('window:minimize-to-tray'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   setEmergencyShortcut: (accelerator) => ipcRenderer.invoke('app:set-emergency-shortcut', accelerator),

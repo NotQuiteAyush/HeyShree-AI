@@ -720,6 +720,7 @@ export default function App() {
 
           if (data.type === "wake_accepted") {
             if (voiceControllerRef.current?.wake()) {
+              void window.shreeDesktop?.bringToForegroundOnWake();
               streamerRef.current?.setWakeWordMode(false);
               setVoicePhase("listening");
               setAssistantState("listening");
@@ -1481,7 +1482,17 @@ export default function App() {
         />
       )}
 
-      {showSettingsPanel && <DesktopSettings forceSetup={!setupReady} onClose={closeSettings} onReady={(settings) => { setRuntimeSettings(settings); setSetupReady(true); applyAppearance(settings); }} />}
+      {showSettingsPanel && <DesktopSettings
+        forceSetup={!setupReady}
+        onClose={closeSettings}
+        onReady={(settings) => { setRuntimeSettings(settings); setSetupReady(true); applyAppearance(settings); }}
+        onSettingsChange={(settings) => {
+          setRuntimeSettings(settings);
+          if (socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(JSON.stringify({ type: "wake_settings", phrases: settings.wake_phrases }));
+          }
+        }}
+      />}
 
       {updateState && <UpdatePrompt state={updateState} setState={setUpdateState} />}
 

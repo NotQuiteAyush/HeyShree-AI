@@ -17,8 +17,8 @@ android {
         applicationId = "ai.shree.companion"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1157
-        versionName = "1.1.52"
+        versionCode = 1158
+        versionName = "1.1.53"
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {

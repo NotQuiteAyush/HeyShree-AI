@@ -149,6 +149,7 @@ class ApplicationSettings(BaseModel):
     wake_word_enabled: bool = False
     wake_phrases: list[str] = Field(default_factory=lambda: ["Hello Shree", "Hi Shree", "Hey Shree", "Namaste Shree", "Shree"], max_length=10)
     background_listening: bool = False
+    wake_foreground_on_detection: bool = True
     auto_sleep_enabled: bool = True
     auto_sleep_timeout_seconds: int = Field(default=15, ge=1, le=3600)
     reasoning_enabled: bool = True
@@ -206,6 +207,18 @@ class ApplicationSettings(BaseModel):
     tool_execution_logs: bool = True
     api_request_logs: bool = False
     gemini_api_validated_at: str | None = None
+
+    @field_validator("wake_phrases")
+    @classmethod
+    def reject_generic_single_word_wake_phrases(cls, values: list[str]) -> list[str]:
+        generic_greetings = {"hey", "hello", "hi", "okay", "ok", "namaste"}
+        normalized = list(dict.fromkeys(" ".join(str(value).strip().split()) for value in values if str(value).strip()))
+        return [value for value in normalized if value.casefold() not in generic_greetings]
+
+    @field_validator("auto_sleep_timeout_seconds")
+    @classmethod
+    def keep_conversation_alive_long_enough_to_reply(cls, value: int) -> int:
+        return max(10, value)
 
     @field_validator("accent_color")
     @classmethod

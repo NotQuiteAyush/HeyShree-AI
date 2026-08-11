@@ -33,6 +33,7 @@ let reminderPollFailures = 0;
 let fullscreenMonitor;
 let companionSnapTimer;
 let companionDragTimer;
+let wakeForegroundTimer;
 let registeredEmergencyShortcut;
 let registeredCompanionShortcut;
 let updater;
@@ -131,6 +132,7 @@ const desktopPreferenceDefaults = {
   floating_edge_snapping: true,
   floating_animation_quality: 'Balanced',
   floating_activation_shortcut: 'CommandOrControl+Alt+Space',
+  wake_foreground_on_detection: true,
 };
 
 function readDesktopPreferences() {
@@ -367,10 +369,13 @@ function allowMobileFirewallAccess() {
 async function startBackend() {
   if (await backendHealth()) return;
   const [command, args] = backendCommand();
+  const wakeModelPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'backend', 'wake-model')
+    : path.join(app.getAppPath(), 'backend', 'models', 'vosk-model-small-en-us-0.15');
   backendProcess = spawn(command, args, {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, SHREE_DESKTOP: '1', SHREE_BACKEND_HOST: '0.0.0.0', SHREE_BACKEND_PORT: String(backendPort) },
+    env: { ...process.env, SHREE_DESKTOP: '1', SHREE_BACKEND_HOST: '0.0.0.0', SHREE_BACKEND_PORT: String(backendPort), SHREE_WAKE_MODEL_PATH: wakeModelPath },
   });
   backendProcess.stdout.on('data', (data) => log.info(`[backend] ${String(data).trim()}`));
   backendProcess.stderr.on('data', (data) => log.warn(`[backend] ${String(data).trim()}`));
@@ -590,6 +595,33 @@ function showCompanion(options = {}) {
   return true;
 }
 
+function bringShreeToForegroundOnWake() {
+  if (quitting || !desktopPreferences.wake_foreground_on_detection) return false;
+  clearTimeout(wakeForegroundTimer);
+
+  let target = mainWindow;
+  if (!mainWindow?.isVisible() && desktopPreferences.floating_mode_enabled && !setupRequiredAtStartup) {
+    showCompanion({ force: true });
+    target = companionWindow;
+  }
+  if (!target || target.isDestroyed()) return false;
+
+  if (target === mainWindow && target.isMinimized()) target.restore();
+  target.show();
+  target.setAlwaysOnTop(true, 'floating');
+  target.moveTop();
+  target.focus();
+
+  wakeForegroundTimer = setTimeout(() => {
+    wakeForegroundTimer = undefined;
+    if (!target || target.isDestroyed()) return;
+    const keepCompanionOnTop = target === companionWindow && Boolean(desktopPreferences.floating_always_on_top);
+    target.setAlwaysOnTop(keepCompanionOnTop, 'floating');
+  }, 1500);
+  wakeForegroundTimer.unref?.();
+  return true;
+}
+
 async function monitorFullscreenWindow() {
   if (quitting || !desktopPreferences.floating_mode_enabled || !desktopPreferences.floating_auto_hide_fullscreen || mainWindow?.isVisible()) return;
   try {
@@ -763,6 +795,7 @@ ipcMain.handle('app:notify', (_event, { title, body }) => {
   new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 500), icon: brandAssetPath('shree-mark.png') }).show();
   return true;
 });
+ipcMain.handle('app:wake-foreground', () => bringShreeToForegroundOnWake());
 ipcMain.handle('window:minimize-to-tray', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   mainWindow.hide();
@@ -923,6 +956,7 @@ app.on('before-quit', () => {
   if (reminderMonitor) clearInterval(reminderMonitor);
   if (fullscreenMonitor) clearInterval(fullscreenMonitor);
   clearTimeout(companionSnapTimer);
+  clearTimeout(wakeForegroundTimer);
   clearInterval(companionDragTimer);
   globalShortcut.unregisterAll();
   stopBackend();

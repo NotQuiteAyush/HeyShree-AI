@@ -8,9 +8,11 @@ from time import monotonic
 
 
 logger = logging.getLogger("shree.wake_word")
+_DEFAULT_WAKE_PHRASES = ("Hello Shree", "Hi Shree", "Hey Shree", "Namaste Shree", "Shree")
 _WAKE_NAME_VARIANTS = {
     "shree", "shri", "sri", "sree", "three",
-    "shre", "shry", "shiri", "sharee", "siri", "tree", "3",
+    "shre", "shry", "shrey", "shray", "shrie", "shiri",
+    "sharee", "sherry", "siri", "tree", "3",
 }
 _NUMBER_CONTEXT_FOLLOWERS = {
     "file", "files", "folder", "folders", "percent", "percentage", "seconds", "minutes",
@@ -51,7 +53,7 @@ class WakeWordGate:
     def __init__(self, enabled: bool, background_listening: bool, phrases: list[str] | None = None) -> None:
         self.enabled = enabled
         self.background_listening = background_listening
-        self.phrases = phrases or ["Shree"]
+        self.phrases = self._normalize_phrases(phrases)
         self.state = (
             VoiceConversationState.SLEEPING
             if enabled and background_listening
@@ -67,6 +69,16 @@ class WakeWordGate:
     def active(self) -> bool:
         return self.state is not VoiceConversationState.SLEEPING
 
+    @property
+    def effective_phrases(self) -> list[str]:
+        """Standard greetings plus user phrases, for local recognizer grammar."""
+        return self._effective_phrases()
+
+    @property
+    def effective_phrases(self) -> list[str]:
+        """Standard greetings plus user phrases, for local recognizer grammar."""
+        return self._effective_phrases()
+
     def activate_manually(self) -> None:
         self._clear_candidate()
         self.state = VoiceConversationState.LISTENING
@@ -81,6 +93,12 @@ class WakeWordGate:
 
     def set_state(self, state: VoiceConversationState) -> None:
         self.state = state
+
+    def configure_phrases(self, phrases: list[str] | None) -> None:
+        """Apply saved wake phrases to an already-running voice session."""
+        self.phrases = self._normalize_phrases(phrases)
+        self._clear_candidate()
+        logger.info("[WakeWord] Applied %d custom wake phrase(s)", len(self.phrases))
 
     def inspect(self, transcript: str, now: float | None = None) -> WakeDecision:
         current_time = monotonic() if now is None else now
@@ -169,7 +187,7 @@ class WakeWordGate:
     def _could_be_configured_prefix(self, candidate: list[str]) -> bool:
         if not candidate:
             return False
-        for phrase in self.phrases:
+        for phrase in self._effective_phrases():
             expected = _words(phrase)
             if not expected or len(candidate) >= len(expected):
                 continue
@@ -191,7 +209,7 @@ class WakeWordGate:
         if not transcript_words:
             return None
         configured: list[tuple[list[str], str]] = []
-        for phrase in self.phrases:
+        for phrase in self._effective_phrases():
             phrase_words = _words(phrase)
             if phrase_words:
                 configured.append((phrase_words, phrase))
@@ -226,3 +244,13 @@ class WakeWordGate:
         ):
             return 1, "Shree"
         return None
+
+    @staticmethod
+    def _normalize_phrases(phrases: list[str] | None) -> list[str]:
+        generic_greetings = {"hey", "hello", "hi", "okay", "ok", "namaste"}
+        normalized = list(dict.fromkeys(str(phrase).strip() for phrase in (phrases or []) if str(phrase).strip()))
+        return [phrase for phrase in normalized if phrase.casefold() not in generic_greetings]
+
+    def _effective_phrases(self) -> list[str]:
+        # The standard Shree greetings always work; user phrases extend them.
+        return list(dict.fromkeys((*_DEFAULT_WAKE_PHRASES, *self.phrases)))

@@ -51,7 +51,14 @@ interface Props {
   onClose(): void;
   forceSetup?: boolean;
   onReady?(settings: ShreeSettings): void;
+  onSettingsChange?(settings: ShreeSettings): void;
 }
+
+const GENERIC_SINGLE_WORD_WAKE_PHRASES = new Set(["hey", "hello", "hi", "okay", "ok", "namaste"]);
+const isValidCustomWakePhrase = (value: string) => {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return Boolean(normalized) && !GENERIC_SINGLE_WORD_WAKE_PHRASES.has(normalized.toLowerCase());
+};
 interface Plugin {
   id: string;
   name: string;
@@ -135,7 +142,7 @@ const categories: Array<{
     id: "wake",
     label: "Wake Word",
     icon: Mic2,
-    keywords: "hello hi hey namaste background listening phrase",
+    keywords: "hello hi hey namaste background listening phrase foreground front top",
   },
   {
     id: "ai",
@@ -221,6 +228,7 @@ const electronKeys = new Set<keyof ShreeSettings>([
   "floating_edge_snapping",
   "floating_animation_quality",
   "floating_activation_shortcut",
+  "wake_foreground_on_detection",
 ]);
 
 function Card({
@@ -367,6 +375,7 @@ export function DesktopSettings({
   onClose,
   forceSetup = false,
   onReady,
+  onSettingsChange,
 }: Props) {
   const [active, setActive] = useState<Category>(
     forceSetup ? "api" : "general",
@@ -503,6 +512,7 @@ export function DesktopSettings({
           });
           if (result.restart_required) setRestartRequired(true);
         }
+        onSettingsChange?.(next);
       } catch (error) {
         notify(error instanceof Error ? error.message : String(error));
         load();
@@ -935,7 +945,7 @@ export function DesktopSettings({
     <>
       <Card
         title="Wake-word detection"
-        description="Shree uses a single wake-state controller with phonetic matching and duplicate suppression."
+        description="Shree listens locally with an offline streaming model, phonetic name matching, and duplicate suppression."
         icon={Mic2}
       >
         <Row title="Enable wake word">
@@ -955,6 +965,16 @@ export function DesktopSettings({
           />
         </Row>
         <Row
+          title="Bring Shree to front on wake"
+          description="Shows Shree above other windows as soon as she recognizes her name."
+        >
+          <Toggle
+            value={values.wake_foreground_on_detection}
+            disabled={!values.wake_word_enabled}
+            onChange={(value) => persist("wake_foreground_on_detection", value)}
+          />
+        </Row>
+        <Row
           title="Auto Sleep After Conversation"
           description="Automatically returns Shree to wake-word mode when you stop talking."
         >
@@ -964,16 +984,16 @@ export function DesktopSettings({
             onChange={(value) => persist("auto_sleep_enabled", value)}
           />
         </Row>
-        <Row title="Inactive For (seconds)" description="Enter any whole number from 1 to 3600.">
+        <Row title="Inactive For (seconds)" description="Enter 10 to 3600 seconds so Shree cannot sleep while a reply is starting.">
           <input
             type="number"
-            min={1}
+            min={10}
             max={3600}
             step={1}
             value={values.auto_sleep_timeout_seconds}
             disabled={!values.wake_word_enabled || !values.auto_sleep_enabled}
             onChange={(event) => {
-              const seconds = Math.min(3600, Math.max(1, Math.round(Number(event.target.value) || 15)));
+              const seconds = Math.min(3600, Math.max(10, Math.round(Number(event.target.value) || 15)));
               persist("auto_sleep_timeout_seconds", seconds);
             }}
             className="w-24 rounded-xl border border-white/10 bg-[#080d18] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-40"
@@ -989,7 +1009,7 @@ export function DesktopSettings({
             placeholder="Add a custom wake phrase"
           />
           <Button
-            disabled={!wakePhrase.trim()}
+            disabled={!isValidCustomWakePhrase(wakePhrase)}
             onClick={() => {
               persist("wake_phrases", [
                 ...values.wake_phrases,
@@ -1001,6 +1021,9 @@ export function DesktopSettings({
             <Plus size={13} /> Add
           </Button>
         </div>
+        <p className="mt-2 text-[10px] text-slate-500">
+          Use a distinct name or phrase. Generic words such as Hey or Hello alone are ignored to prevent accidental wakes.
+        </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {values.wake_phrases.map((phrase) => (
             <button

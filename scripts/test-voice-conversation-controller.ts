@@ -36,6 +36,26 @@ controller.configure(false, 10, true);
 controller.waitForUser();
 assert.equal(scheduled, null, "Auto Sleep OFF must not schedule a timeout");
 
+let staleSleepCount = 0;
+let staleCallback: (() => void) | null = null;
+const staleController = new VoiceConversationController({
+  wakeWordEnabled: true,
+  initiallySleeping: false,
+  autoSleepEnabled: true,
+  timeoutSeconds: 15,
+  onSleep: () => { staleSleepCount += 1; },
+  schedule: (callback) => { staleCallback = callback; return callback; },
+  // Simulate a callback that was already queued and cannot be removed.
+  cancelScheduled: () => {},
+});
+staleController.waitForUser();
+const queuedBeforeWake = staleCallback as (() => void);
+staleController.sleepNow();
+staleController.wake();
+queuedBeforeWake();
+assert.equal(staleController.state, "listening");
+assert.equal(staleSleepCount, 1, "a stale inactivity callback must not put Shree back to sleep after waking");
+
 console.log("Voice conversation state and auto-sleep checks passed.");
 
 let now = 0;

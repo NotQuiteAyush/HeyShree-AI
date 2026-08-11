@@ -12,6 +12,7 @@ export class VoiceConversationController {
   private readonly now: () => number;
   private deadlineMs: number | null = null;
   private pausedRemainingMs: number | null = null;
+  private timerGeneration = 0;
 
   constructor(options: {
     wakeWordEnabled: boolean;
@@ -88,7 +89,9 @@ export class VoiceConversationController {
 
   private armTimer(delayMs: number): void {
     this.deadlineMs = this.now() + delayMs;
+    const generation = ++this.timerGeneration;
     this.timer = this.schedule(() => {
+      if (generation !== this.timerGeneration) return;
       this.timer = null;
       this.deadlineMs = null;
       if (this.phase !== "waiting_for_user") return;
@@ -108,6 +111,7 @@ export class VoiceConversationController {
   destroy(): void { this.cancelTimer(); }
 
   private cancelTimer(): void {
+    this.timerGeneration += 1;
     if (this.timer) this.cancelScheduled(this.timer);
     this.timer = null;
     this.deadlineMs = null;

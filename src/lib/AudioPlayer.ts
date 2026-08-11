@@ -97,8 +97,9 @@ export class AudioPlayer {
 
       const currentTime = this.audioContext.currentTime;
       if (this.nextStartTime < currentTime) {
-        // Add a 20ms jitter cushion buffer to absorb any scheduling lag
-        this.nextStartTime = currentTime + 0.02;
+        // A tiny scheduling cushion prevents clicks without making the first
+        // response feel buffered.
+        this.nextStartTime = currentTime + 0.005;
       }
 
       sourceNode.start(this.nextStartTime);
@@ -146,7 +147,7 @@ export class AudioPlayer {
         this.lastPlaybackState = isCurrentlyPlaying;
         this.onPlaybackStateChange(isCurrentlyPlaying);
       }
-    }, 80);
+    }, 25);
   }
 
   destroy() {

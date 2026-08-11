@@ -15,6 +15,7 @@ backend-dist/
 .runtime/
 .runtime*/
 .inspect*/
+.tmp-*-inspect/
 .release-audit*/
 .release-inspect*/
 .test-output/

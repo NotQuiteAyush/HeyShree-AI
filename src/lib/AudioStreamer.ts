@@ -17,8 +17,14 @@ export class AudioStreamer {
   private inputDeviceId: string;
   private zeroSampleCount = 0;
   private microphoneProblemReported = false;
-  private preRollBuffers: ArrayBuffer[] = [];
   private voiceTurnDetector = new VoiceTurnDetector();
+  private bargeInDetector = new VoiceTurnDetector({
+    minimumSpeechMs: 96,
+    endOfSpeechSilenceMs: 128,
+    speechRmsThreshold: 0.006,
+    speechPeakThreshold: 0.02,
+  });
+  private bargeInPreRoll: ArrayBuffer[] = [];
   private stopped = true;
   private reconnecting = false;
   private reconnectAttempts = 0;
@@ -27,7 +33,7 @@ export class AudioStreamer {
   private wakeWordMode = false;
   private playbackReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private static readonly PRE_ROLL_CHUNKS = 3;
+  private static readonly BARGE_IN_PRE_ROLL_CHUNKS = 3;
 
   constructor(
     onAudioData: (base64: string) => void,
@@ -120,16 +126,6 @@ export class AudioStreamer {
 
         const inputData = e.inputBuffer.getChannelData(0);
 
-        // Do not feed SHREE's own speaker output back into Gemini as a second
-        // user turn. Chromium echo cancellation remains enabled, while this
-        // deterministic half-duplex guard prevents the duplicate-assistant
-        // behaviour seen on speakers where acoustic cancellation is weak.
-        if (this.playbackActive) {
-          this.preRollBuffers = [];
-          this.voiceTurnDetector.reset();
-          return;
-        }
-
         // Convert Float32 [-1.0, 1.0] to standard Int16 PCM
         const pcm16 = new Int16Array(inputData.length);
         let peak = 0;
@@ -168,9 +164,44 @@ export class AudioStreamer {
         // reliably, especially when the first consonant is quiet. While Shree
         // is sleeping, forward the complete microphone stream and let
         // Gemini's server-side high-sensitivity VAD identify the utterance.
-        // Active conversation continues to use the local noise/turn gate.
+        // Active conversation also stays continuous so short or quiet replies
+        // are never discarded before server-side recognition.
         if (this.wakeWordMode) {
           this.onAudioData(this.bufferToBase64(pcmBuffer));
+          return;
+        }
+
+        // While Shree speaks, keep a stricter local gate in front of Gemini so
+        // Chromium echo cancellation is not the only protection from speaker
+        // feedback. Sustained user speech is still forwarded, enabling natural
+        // barge-in instead of silently discarding an interruption.
+        if (this.playbackActive) {
+          const bargeEvent = this.bargeInDetector.update(
+            peak,
+            this.rms(inputData),
+            pcm16.length,
+            this.audioContext.sampleRate,
+          );
+          if (bargeEvent === "idle" || bargeEvent === "rejected") {
+            this.bargeInPreRoll = [];
+            return;
+          }
+          if (bargeEvent === "candidate" || bargeEvent === "start") {
+            this.bargeInPreRoll.push(pcmBuffer);
+            if (this.bargeInPreRoll.length > AudioStreamer.BARGE_IN_PRE_ROLL_CHUNKS) {
+              this.bargeInPreRoll.shift();
+            }
+            if (bargeEvent === "start") {
+              this.onGenuineSpeech?.();
+              for (const buffered of this.bargeInPreRoll) {
+                this.onAudioData(this.bufferToBase64(buffered));
+              }
+              this.bargeInPreRoll = [];
+            }
+            return;
+          }
+          this.onAudioData(this.bufferToBase64(pcmBuffer));
+          if (bargeEvent === "end") this.onAudioStreamEnd?.();
           return;
         }
 
@@ -181,33 +212,14 @@ export class AudioStreamer {
           this.audioContext.sampleRate,
         );
 
-        if (voiceEvent === "candidate") this.onPotentialSpeech?.();
-        if (voiceEvent === "rejected") {
-          this.preRollBuffers = [];
-          this.onSpeechRejected?.();
-          return;
-        }
-
-        if (voiceEvent === "idle" || voiceEvent === "candidate" || voiceEvent === "start") {
-          this.preRollBuffers.push(pcmBuffer);
-          if (this.preRollBuffers.length > AudioStreamer.PRE_ROLL_CHUNKS) {
-            this.preRollBuffers.shift();
-          }
-          if (voiceEvent === "start") {
-            this.onGenuineSpeech?.();
-            for (const buffered of this.preRollBuffers) {
-              this.onAudioData(this.bufferToBase64(buffered));
-            }
-            this.preRollBuffers = [];
-          }
-          return;
-        }
-
+        // Never discard quiet or short speech in active conversation. The
+        // server receives the continuous stream and performs high-sensitivity
+        // recognition; this detector only accelerates UI and turn-end signals.
         this.onAudioData(this.bufferToBase64(pcmBuffer));
-        if (voiceEvent === "end") {
-          this.preRollBuffers = [];
-          this.onAudioStreamEnd?.();
-        }
+        if (voiceEvent === "candidate") this.onPotentialSpeech?.();
+        if (voiceEvent === "rejected") this.onSpeechRejected?.();
+        if (voiceEvent === "start") this.onGenuineSpeech?.();
+        if (voiceEvent === "end") this.onAudioStreamEnd?.();
       };
     } catch (err) {
       this.releaseCapture();
@@ -320,8 +332,9 @@ export class AudioStreamer {
     this.analyser = null;
     this.zeroSampleCount = 0;
     this.microphoneProblemReported = false;
-    this.preRollBuffers = [];
+    this.bargeInPreRoll = [];
     this.voiceTurnDetector.reset();
+    this.bargeInDetector.reset();
   }
 
   setPlaybackActive(active: boolean): void {
@@ -331,8 +344,9 @@ export class AudioStreamer {
     }
     if (active) {
       this.playbackActive = true;
-      this.preRollBuffers = [];
+      this.bargeInPreRoll = [];
       this.voiceTurnDetector.reset();
+      this.bargeInDetector.reset();
       return;
     }
     // Keep the gate closed briefly for speaker/room echo after playback ends.
@@ -340,14 +354,17 @@ export class AudioStreamer {
       this.playbackReleaseTimer = null;
       this.playbackActive = false;
       this.voiceTurnDetector.reset();
-    }, 400);
+      this.bargeInDetector.reset();
+      this.bargeInPreRoll = [];
+    }, 50);
   }
 
   setWakeWordMode(active: boolean): void {
     if (this.wakeWordMode === active) return;
     this.wakeWordMode = active;
-    this.preRollBuffers = [];
+    this.bargeInPreRoll = [];
     this.voiceTurnDetector.reset();
+    this.bargeInDetector.reset();
     console.info(`[WakeWord] Microphone wake mode ${active ? "enabled" : "disabled"}`);
   }
 

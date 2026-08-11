@@ -9,6 +9,7 @@ declare global {
       setLaunchAtLogin(enabled: boolean): Promise<boolean>;
       getLaunchAtLogin(): Promise<boolean>;
       showNotification(title: string, body: string): Promise<boolean>;
+      bringToForegroundOnWake(): Promise<boolean>;
       minimizeToTray(): Promise<boolean>;
       openExternal(url: string): Promise<boolean>;
       setEmergencyShortcut(accelerator: string): Promise<string>;

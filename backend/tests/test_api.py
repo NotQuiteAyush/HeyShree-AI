@@ -115,11 +115,11 @@ async def test_shree_identity_has_stable_creator_and_mark_facts():
         assert identity["designation"] == "Mark 12"
         assert identity["creator"]["name"] == "Ayush Keshri"
         assert "designed and built Shree AI" in identity["creator"]["known_fact"]
-        assert identity["runtime_version"] == "1.1.52"
+        assert identity["runtime_version"] == "1.1.53"
 
     from shree.live import _live_config, _live_tools
     instruction = str(_live_config()["system_instruction"])
-    assert "Your name is Shree" in instruction
+    assert "You are Shree" in instruction
     assert "created by Ayush" in instruction
     names = {item["name"] for item in _live_tools()[0]["function_declarations"]}
     assert "getShreeIdentity" in names
@@ -283,19 +283,19 @@ def test_live_uses_soft_voice_short_answers_and_optional_current_search():
 
     defaults = ApplicationSettings()
     config = _live_config(runtime=defaults)
-    assert get_settings().gemini_live_model == "gemini-2.5-flash-native-audio-latest"
+    assert get_settings().gemini_live_model == "gemini-3.1-flash-live-preview"
     assert config["speech_config"]["voice_config"]["prebuilt_voice_config"]["voice_name"] == "Achernar"
-    assert "usually under 25 spoken words" in str(config["system_instruction"])
+    assert "usually under 15 spoken words" in str(config["system_instruction"])
     assert "Do not restate the request" in str(config["system_instruction"])
     assert "never change volume for an application-launch request" in str(config["system_instruction"])
-    assert config["thinking_config"]["thinking_budget"] == 0
-    fallback_config = _live_config(runtime=defaults, model_name="gemini-3.1-flash-live-preview")
-    assert fallback_config["thinking_config"]["thinking_level"] == "MINIMAL"
+    assert config["thinking_config"]["thinking_level"] == "MINIMAL"
+    fallback_config = _live_config(runtime=defaults, model_name="gemini-2.5-flash-native-audio-latest")
+    assert fallback_config["thinking_config"]["thinking_budget"] == 0
     vad = config["realtime_input_config"]["automatic_activity_detection"]
-    assert vad["prefix_padding_ms"] == 80
-    assert vad["silence_duration_ms"] == 700
+    assert vad["prefix_padding_ms"] == 20
+    assert vad["silence_duration_ms"] == 100
     instruction = str(config["system_instruction"])
-    assert "open Notepad, foreground its window, then type" in instruction
+    assert "MUST call the relevant available tool before speaking" in instruction
     assert "call getShreeIdentity" in instruction
     assert "Never reinterpret Hindi/Hinglish as Urdu" in instruction
     normalized = _normalize_user_transcript("ہیلو، آپ کیسے ہیں؟")
@@ -361,6 +361,10 @@ def test_wake_gate_handles_phonetic_three_once_and_keeps_number_three():
     urdu_transcription = WakeWordGate(True, True, ["Shree"]).inspect("shry")
     assert urdu_transcription.accepted is True
 
+    for common_transcription in ("shrey", "shray", "shrie", "sherry"):
+        recognized = WakeWordGate(True, True, ["Shree"]).inspect(common_transcription)
+        assert recognized.accepted is True
+
     numeric_stt = WakeWordGate(True, True, ["Shree"]).inspect("three 3")
     assert numeric_stt.accepted is True and numeric_stt.command == ""
 
@@ -389,6 +393,59 @@ def test_wake_gate_combines_fragmented_custom_phrase_once():
     assert accepted_cumulative.accepted is True
     assert accepted_cumulative.command == "open chrome"
 
+def test_standard_greetings_always_work_and_custom_phrases_hot_reload():
+    from shree.wake_word import WakeWordGate
+
+    gate = WakeWordGate(True, True, ["Shree"])
+    partial = gate.inspect("Hey", now=1.0)
+    assert partial.accepted is False and partial.active is False
+    accepted = gate.inspect("Hey Shree", now=1.2)
+    assert accepted.accepted is True and accepted.phrase == "Hey Shree"
+
+    gate.sleep()
+    gate.configure_phrases(["Hello Nova"])
+    custom = gate.inspect("Hello Nova", now=2.0)
+    assert custom.accepted is True and custom.phrase == "Hello Nova"
+
+    generic = WakeWordGate(True, True, ["Hey", "hello"])
+    assert generic.inspect("Hey", now=3.0).accepted is False
+    assert generic.inspect("Hello", now=3.1).accepted is False
+
+def test_offline_wake_recognizer_streams_partial_and_rebuilds_custom_grammar(tmp_path):
+    import json
+    from shree.local_wake import LocalWakeRecognizer
+
+    model_path = tmp_path / "wake-model"
+    model_path.mkdir()
+    grammars = []
+
+    class FakeRecognizer:
+        def __init__(self, _model, _rate, grammar):
+            grammars.append(json.loads(grammar))
+            self.reset_count = 0
+
+        def AcceptWaveform(self, _audio): return False
+        def PartialResult(self): return json.dumps({"partial": "hey shree"})
+        def Result(self): return json.dumps({"text": ""})
+        def Reset(self): self.reset_count += 1
+
+    listener = LocalWakeRecognizer(
+        ["Hey Shree", "Hello Nova"],
+        model_path=model_path,
+        model_loader=lambda _path: object(),
+        recognizer_factory=FakeRecognizer,
+    )
+    assert listener.available is True
+    assert listener.accept_audio(b"\x00\x00") == "hey shree"
+    assert listener.accept_audio(b"\x00\x00") is None
+    assert "hey shree" in grammars[0]
+    assert "hey sri" in grammars[0]
+    assert "hello nova" in grammars[0]
+    assert "[unk]" in grammars[0]
+
+    listener.configure_phrases(["Okay Computer"])
+    assert "okay computer" in grammars[-1]
+
 def test_auto_sleep_settings_defaults_and_validation():
     from pydantic import ValidationError
     from shree.models import ApplicationSettings
@@ -396,6 +453,10 @@ def test_auto_sleep_settings_defaults_and_validation():
     defaults = ApplicationSettings()
     assert defaults.auto_sleep_enabled is True
     assert defaults.auto_sleep_timeout_seconds == 15
+    assert defaults.wake_foreground_on_detection is True
+    sanitized = ApplicationSettings(wake_phrases=["Hey", "hello", "Jarvis"], auto_sleep_timeout_seconds=6)
+    assert sanitized.wake_phrases == ["Jarvis"]
+    assert sanitized.auto_sleep_timeout_seconds == 10
     assert ApplicationSettings(auto_sleep_timeout_seconds=12).auto_sleep_timeout_seconds == 12
     with pytest.raises(ValidationError):
         ApplicationSettings(auto_sleep_timeout_seconds=0)
@@ -408,10 +469,15 @@ async def test_auto_sleep_settings_persist_across_settings_reload():
     from shree.settings_store import get_application_settings, update_application_settings
 
     await initialize_database()
-    await update_application_settings({"auto_sleep_enabled": False, "auto_sleep_timeout_seconds": 20})
+    await update_application_settings({
+        "auto_sleep_enabled": False,
+        "auto_sleep_timeout_seconds": 20,
+        "wake_foreground_on_detection": False,
+    })
     reloaded = await get_application_settings()
     assert reloaded.auto_sleep_enabled is False
     assert reloaded.auto_sleep_timeout_seconds == 20
+    assert reloaded.wake_foreground_on_detection is False
 
 def test_quota_errors_are_mapped_to_safe_actionable_guidance():
     from shree.live import _is_quota_error, _public_live_error
@@ -493,7 +559,7 @@ def test_live_exposes_one_universal_visual_computer_interface():
     actions = set(universal["parameters"]["properties"]["action"]["enum"])
     assert {"observe", "launch", "type", "keys", "click", "drag", "scroll", "verify"} <= actions
     instruction = str(_live_config()["system_instruction"])
-    assert "universal observe-act-verify loop" in instruction
+    assert "use computer_use only for visual interfaces" in instruction
     assert "Browser navigation, page analysis" not in instruction
 
 def test_browser_target_converts_domains_and_searches_without_keyboard_steps():
@@ -522,12 +588,32 @@ def test_power_live_tools_are_available_only_when_unified_switch_is_enabled():
     assert transitions <= enabled
     assert "cancel_power_action" in disabled
 
+def test_all_installed_desktop_tools_are_exposed_when_settings_enable_them():
+    from shree.live import _live_tools
+    from shree.models import ApplicationSettings
+    from shree.tools import registry
+
+    runtime = ApplicationSettings(
+        tool_use_enabled=True,
+        desktop_control_enabled=True,
+        file_management_enabled=True,
+        keyboard_automation_enabled=True,
+        mouse_automation_enabled=True,
+        screen_understanding_enabled=True,
+        screen_capture_enabled=True,
+        clipboard_access_enabled=True,
+        power_controls_enabled=True,
+    )
+    exposed = {item["name"] for item in _live_tools(runtime)[0]["function_declarations"]}
+    installed = set(registry.tools) - {"delete_memory"}
+    assert installed <= exposed
+
 def test_shree_uses_feminine_hindi_and_hinglish_self_grammar():
     from shree.live import _live_config
     instruction = str(_live_config()["system_instruction"])
-    assert "feminine persona" in instruction
-    assert "main karti hoon" in instruction
-    assert "Never use masculine self-grammar" in instruction
+    assert "feminine first-person grammar" in instruction
+    assert "Romanized Hinglish" in instruction
+    assert "never Devanagari or Arabic/Urdu script" in instruction
 
 @pytest.mark.asyncio
 async def test_typed_command_is_sent_as_a_complete_user_turn():
@@ -632,6 +718,46 @@ async def test_live_receiver_consumes_more_than_one_completed_turn(monkeypatch):
     assert session.receive_calls >= 3
     completed = [item for item in websocket.messages if item.get("type") == "turn_complete"]
     assert len(completed) == 2
+
+@pytest.mark.asyncio
+async def test_live_receiver_rotates_after_a_slow_first_audio_response():
+    import time
+    from shree.live import _receive_gemini
+
+    audio_part = SimpleNamespace(
+        inline_data=SimpleNamespace(data=b"\x01\x02"),
+        text=None,
+        thought=False,
+    )
+    content = SimpleNamespace(
+        model_turn=SimpleNamespace(parts=[audio_part]),
+        input_transcription=None,
+        output_transcription=None,
+        interrupted=False,
+    )
+    response = SimpleNamespace(
+        session_resumption_update=None,
+        go_away=None,
+        server_content=content,
+        tool_call=None,
+    )
+
+    class Session:
+        def receive(self):
+            async def messages():
+                yield response
+            return messages()
+
+    class WebSocket:
+        def __init__(self): self.messages = []
+        async def send_json(self, message): self.messages.append(message)
+
+    websocket = WebSocket()
+    latency_state = {"turn_end_at": time.monotonic() - 3.1, "first_audio_logged": False}
+    outcome = await _receive_gemini(Session(), websocket, latency_state=latency_state)
+    assert outcome == "rotate"
+    assert any(item.get("type") == "turn_complete" for item in websocket.messages)
+    assert any(item.get("reason") == "slow_response" for item in websocket.messages)
 
 def test_private_reasoning_text_is_never_exposed_to_the_renderer():
     from shree.live import _public_model_text
