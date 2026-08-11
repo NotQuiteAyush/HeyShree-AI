@@ -9,6 +9,7 @@ export class AudioPlayer {
   private checkPlaybackInterval: any = null;
   private outputDeviceId: string;
   private volume: number;
+  private lastPlaybackState: boolean | null = null;
 
   constructor(
     onAnalyserCreated?: (analyser: AnalyserNode) => void,
@@ -141,7 +142,8 @@ export class AudioPlayer {
       if (!this.audioContext) return;
       const isCurrentlyPlaying =
         this.activeSources.length > 0 && this.audioContext.currentTime < this.nextStartTime;
-      if (this.onPlaybackStateChange) {
+      if (this.onPlaybackStateChange && isCurrentlyPlaying !== this.lastPlaybackState) {
+        this.lastPlaybackState = isCurrentlyPlaying;
         this.onPlaybackStateChange(isCurrentlyPlaying);
       }
     }, 80);
@@ -160,5 +162,6 @@ export class AudioPlayer {
     }
     this.gainNode = null;
     this.analyser = null;
+    this.lastPlaybackState = null;
   }
 }

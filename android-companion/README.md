@@ -25,19 +25,23 @@ The QR expires in five minutes. Pairing requires both possession of its 256-bit 
 
 ## Supported Android actions
 
-- Full duplex SHREE voice conversation through the PC's Gemini Live session
-- Open installed apps or URLs
-- Media play/pause, next, previous, and stop
-- Exact phone media volume
-- Battery status and flashlight
-- Open Wi-Fi, Bluetooth, display, sound, battery, and notification settings
-- Clipboard write and permitted notification summaries
-- Calls and prepared SMS messages with confirmation
-- Alarms, camera, Android share sheet
+- Full duplex voice and typed SHREE conversation through the PC's Gemini Live session
+- Shared desktop memory, reminders, and recent conversation cache; the last sync remains readable offline and survives normal app updates
+- Open/search installed apps, URLs, Google, YouTube, Maps searches, and navigation
+- Media play, pause, next, previous, stop, exact volume, volume adjustment, mute, and unmute
+- Screen brightness/orientation (after Android's Modify system settings grant)
+- Battery/charging, storage, basic device information, last-known location, and flashlight
+- Open Wi-Fi, Bluetooth, mobile-data, hotspot, airplane-mode, display, sound, battery, file, and notification settings
+- Clipboard write and foreground-permitted reads; notification summaries and replies when the source notification supports Android inline reply
+- Contact lookup, direct calls, prepared SMS, and prepared WhatsApp messages with fresh confirmation for sensitive actions
+- Alarms, timers, calendar event creation/readback, camera, gallery, files, audio recorder, and Android share sheet
+- Local phone notes plus the desktop-backed SHREE memory and reminder tools
 - Optional visible-element clicking, focused-field typing, and coordinate taps through Accessibility
 - Voice requests from the phone can use all existing permitted SHREE Windows tools
 
-Android intentionally prevents silent Wi-Fi/Bluetooth toggling, private file access, app installation, account changes, and lock-screen bypass for ordinary apps. SHREE opens the official system UI or reports the limitation instead of claiming success.
+Android intentionally prevents ordinary apps from silently ending calls, force-closing other apps, toggling many connectivity settings, reading the clipboard in the background, accessing private files, installing apps, changing accounts, or bypassing the lock screen. SHREE opens the official system UI or reports the limitation instead of claiming success. WhatsApp and SMS use their official composer UI, so the user makes the final send in the destination app.
+
+Continuous wake-word listening, an always-on overlay bubble, default-dialer call termination, and lock-screen voice are not enabled by the normal companion permissions. They require separate, prominently disclosed Android roles/services and battery-impact controls before release; do not represent them as available in the current build.
 
 ## Build
 

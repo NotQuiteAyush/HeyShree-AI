@@ -935,7 +935,7 @@ export function DesktopSettings({
     <>
       <Card
         title="Wake-word detection"
-        description="Wake phrases are enforced by the active Gemini Live session. Background listening automatically opens a voice session after setup."
+        description="Shree uses a single wake-state controller with phonetic matching and duplicate suppression."
         icon={Mic2}
       >
         <Row title="Enable wake word">
@@ -946,12 +946,38 @@ export function DesktopSettings({
         </Row>
         <Row
           title="Background listening"
-          description="Starts microphone streaming when SHREE opens. Windows will request microphone permission."
+          description="Keeps Shree waiting for a wake phrase after setup. Windows will request microphone permission."
         >
           <Toggle
             value={values.background_listening}
             disabled={!values.wake_word_enabled}
             onChange={(value) => persist("background_listening", value)}
+          />
+        </Row>
+        <Row
+          title="Auto Sleep After Conversation"
+          description="Automatically returns Shree to wake-word mode when you stop talking."
+        >
+          <Toggle
+            value={values.auto_sleep_enabled}
+            disabled={!values.wake_word_enabled}
+            onChange={(value) => persist("auto_sleep_enabled", value)}
+          />
+        </Row>
+        <Row title="Inactive For (seconds)" description="Enter any whole number from 1 to 3600.">
+          <input
+            type="number"
+            min={1}
+            max={3600}
+            step={1}
+            value={values.auto_sleep_timeout_seconds}
+            disabled={!values.wake_word_enabled || !values.auto_sleep_enabled}
+            onChange={(event) => {
+              const seconds = Math.min(3600, Math.max(1, Math.round(Number(event.target.value) || 15)));
+              persist("auto_sleep_timeout_seconds", seconds);
+            }}
+            className="w-24 rounded-xl border border-white/10 bg-[#080d18] px-3 py-2 text-xs text-slate-200 outline-none disabled:opacity-40"
+            aria-label="Auto sleep inactivity seconds"
           />
         </Row>
       </Card>
@@ -1044,7 +1070,7 @@ export function DesktopSettings({
       ))}
       <Row
         title="Shree's voice"
-        description="Aoede restores the natural feminine voice from the 1.1.20 Talk-only build. Voice changes apply on the next conversation."
+        description="Achernar is Shree's soft, natural companion voice. Voice changes apply on the next conversation."
       >
         <Select
           value={values.assistant_voice}

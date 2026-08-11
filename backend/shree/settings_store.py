@@ -74,6 +74,11 @@ async def get_application_settings() -> ApplicationSettings:
         stored["v1_1_20_voice_restored"] = True
         if stored.get("floating_voice_volume", 100) == 100:
             stored["floating_voice_volume"] = 82
+    # Move existing installations once to the softer Achernar voice requested
+    # for Shree's natural companion profile. Users remain free to change it.
+    if not stored.get("soft_voice_migrated", False):
+        stored["assistant_voice"] = "Achernar"
+        stored["soft_voice_migrated"] = True
     known = {key: value for key, value in stored.items() if key in ApplicationSettings.model_fields}
     return ApplicationSettings.model_validate(known)
 

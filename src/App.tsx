@@ -10,6 +10,8 @@ import { UpdatePrompt } from "./components/UpdatePrompt";
 import type { UpdateState } from "./updateTypes";
 import { apiFetch, liveWebSocketUrl } from "./lib/api";
 import { mergeTranscriptFragments } from "./lib/transcript";
+import { toLatinDisplayText } from "./lib/latinText";
+import { VoiceConversationController, type VoiceConversationPhase } from "./lib/VoiceConversationController";
 import { applyAppearance, defaultSettings, type SetupStatus, type ShreeSettings } from "./settingsTypes";
 import shreeMark from "./assets/branding/shree-mark.png";
 import {
@@ -379,13 +381,31 @@ export default function App() {
   const stateRef = useRef<AssistantState>("disconnected");
   const captionTimeoutRef = useRef<any>(null);
   const pendingUserTranscriptRef = useRef("");
-  const backgroundStartAttempted = useRef(false);
+  const sessionGenerationRef = useRef(0);
+  const sessionStartingRef = useRef(false);
   const pendingTextCommandsRef = useRef<string[]>([]);
+  const voiceControllerRef = useRef<VoiceConversationController | null>(null);
+  const [voicePhase, setVoicePhase] = useState<VoiceConversationPhase>("sleeping");
   const [textCommand, setTextCommand] = useState("");
 
   useEffect(() => {
     playerRef.current?.setVolume(runtimeSettings.floating_voice_volume);
   }, [runtimeSettings.floating_voice_volume]);
+
+  useEffect(() => {
+    const controller = voiceControllerRef.current;
+    if (!controller) return;
+    controller.configure(
+      runtimeSettings.auto_sleep_enabled,
+      runtimeSettings.auto_sleep_timeout_seconds,
+      runtimeSettings.wake_word_enabled,
+    );
+    if (!runtimeSettings.wake_word_enabled && controller.sleeping) {
+      controller.wake();
+      setVoicePhase(controller.state);
+      socketRef.current?.send(JSON.stringify({ type: "voice_mode", mode: "active" }));
+    }
+  }, [runtimeSettings.auto_sleep_enabled, runtimeSettings.auto_sleep_timeout_seconds, runtimeSettings.wake_word_enabled]);
 
   // Maintain state ref for audio callbacks
   useEffect(() => {
@@ -393,7 +413,7 @@ export default function App() {
   }, [assistantState]);
 
   const commitPendingUserTranscript = () => {
-    const text = pendingUserTranscriptRef.current.trim();
+    const text = toLatinDisplayText(pendingUserTranscriptRef.current.trim());
     pendingUserTranscriptRef.current = "";
     if (!text) return;
     setCurrentCaption(text);
@@ -407,7 +427,7 @@ export default function App() {
   };
 
   const bufferUserTranscript = (text: string) => {
-    pendingUserTranscriptRef.current = mergeTranscriptFragments(pendingUserTranscriptRef.current, text);
+    pendingUserTranscriptRef.current = mergeTranscriptFragments(pendingUserTranscriptRef.current, toLatinDisplayText(text));
     // Input transcription is incremental and pauses between words can exceed
     // hundreds of milliseconds. Show the merged live caption immediately, but
     // create a history row only when Gemini starts its reply or completes the
@@ -417,7 +437,7 @@ export default function App() {
   };
 
   useEffect(() => window.shreeDesktop?.onReminderDue((payload) => {
-    const reminderText = `Reminder: ${payload.reminder.text}`;
+    const reminderText = toLatinDisplayText(`Reminder: ${payload.reminder.text}`);
     console.info("Reminder due received", payload.reminder.id, { announce: payload.announce });
     setCurrentCaption(reminderText);
     setCaptionRole("model");
@@ -435,7 +455,9 @@ export default function App() {
       setCurrentCaption("");
       setCaptionRole(null);
     }, 8000);
-    if (payload.announce && "speechSynthesis" in window) {
+    // Windows speech synthesis has a different timbre from Gemini's Achernar
+    // voice. Never let both voice engines speak during the same live session.
+    if (payload.announce && stateRef.current === "disconnected" && "speechSynthesis" in window) {
       playerRef.current?.stopAll();
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(reminderText);
@@ -456,8 +478,12 @@ export default function App() {
   }, []);
 
   const cleanupSession = () => {
+    sessionGenerationRef.current += 1;
+    sessionStartingRef.current = false;
     if (captionTimeoutRef.current) clearTimeout(captionTimeoutRef.current);
     pendingUserTranscriptRef.current = "";
+    voiceControllerRef.current?.destroy();
+    voiceControllerRef.current = null;
     
     if (streamerRef.current) {
       streamerRef.current.stop();
@@ -476,12 +502,23 @@ export default function App() {
     setOutputAnalyser(null);
   };
 
-  const startSession = async () => {
+  const startSession = async (options: { wakeOnly?: boolean } = {}) => {
     if (!setupReady) {
       setErrorMessage("Complete Settings and validate the required Gemini API key before starting Shree.");
       setShowSettingsPanel(true);
       return;
     }
+    const existingSocket = socketRef.current;
+    if (
+      sessionStartingRef.current
+      || existingSocket?.readyState === WebSocket.CONNECTING
+      || existingSocket?.readyState === WebSocket.OPEN
+    ) {
+      return;
+    }
+    cleanupSession();
+    sessionStartingRef.current = true;
+    const sessionGeneration = ++sessionGenerationRef.current;
     setErrorMessage(null);
     setAssistantState("connecting");
     setCurrentCaption("Waking up Shree...");
@@ -490,16 +527,40 @@ export default function App() {
     try {
       // Connect to full-stack websocket endpoint on server.ts
       const wsUrl = liveWebSocketUrl();
-      console.log("Connecting to WebSocket at:", wsUrl);
+      console.log("Connecting to the local SHREE voice service.");
       
       const ws = new WebSocket(wsUrl);
       socketRef.current = ws;
+      const initiallySleeping = Boolean(options.wakeOnly && runtimeSettings.wake_word_enabled);
+      const voiceController = new VoiceConversationController({
+        wakeWordEnabled: runtimeSettings.wake_word_enabled,
+        initiallySleeping,
+        autoSleepEnabled: runtimeSettings.auto_sleep_enabled,
+        timeoutSeconds: runtimeSettings.auto_sleep_timeout_seconds,
+        onSleep: () => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "voice_mode", mode: "sleeping" }));
+          playerRef.current?.stopAll();
+          streamerRef.current?.setPlaybackActive(false);
+          streamerRef.current?.setWakeWordMode(true);
+          setVoicePhase("sleeping");
+          setAssistantState("listening");
+          setCurrentCaption('Waiting for "Shree"');
+          setCaptionRole("model");
+        },
+      });
+      voiceControllerRef.current = voiceController;
+      setVoicePhase(voiceController.state);
 
       ws.onopen = () => {
+        if (sessionGeneration !== sessionGenerationRef.current) {
+          ws.close();
+          return;
+        }
         console.log("WebSocket connected to backend. Waiting for live context setup...");
       };
 
       ws.onmessage = async (event) => {
+        if (sessionGeneration !== sessionGenerationRef.current) return;
         try {
           const data = JSON.parse(event.data);
 
@@ -520,10 +581,12 @@ export default function App() {
 
           // 1. Session established and ready
           if (data.state === "connected") {
+            sessionStartingRef.current = false;
             console.log("Gemini session ready. Starting audio pipelines...");
             setAssistantState("listening");
-            setCurrentCaption("Shree is online. Talk to her!");
+            setCurrentCaption(initiallySleeping ? 'Waiting for "Shree"' : "Shree is online. Talk to her!");
             setCaptionRole("model");
+            ws.send(JSON.stringify({ type: "voice_mode", mode: initiallySleeping ? "sleeping" : "active" }));
 
             // Sync current reminders list to the server right away on connect
             ws.send(JSON.stringify({
@@ -539,8 +602,10 @@ export default function App() {
               (isPlaying) => {
                 streamerRef.current?.setPlaybackActive(isPlaying);
                 // Return to listening state when Shree finishes talking
-                if (!isPlaying && stateRef.current === "speaking") {
+                if (!isPlaying && voiceControllerRef.current?.state === "speaking") {
                   setAssistantState("listening");
+                  voiceControllerRef.current?.waitForUser();
+                  setVoicePhase(voiceControllerRef.current?.state || "waiting_for_user");
                 }
               },
               runtimeSettings.audio_output_device_id,
@@ -573,9 +638,18 @@ export default function App() {
                   ws.send(JSON.stringify({ type: "audio_stream_end" }));
                 }
               },
+              () => {
+                const controller = voiceControllerRef.current;
+                if (!controller || controller.sleeping) return;
+                controller.markGenuineSpeech();
+                setVoicePhase(controller.state);
+              },
+              () => voiceControllerRef.current?.markPotentialSpeech(),
+              () => voiceControllerRef.current?.markRejectedNoise(),
             );
             
             streamerRef.current = streamer;
+            streamer.setWakeWordMode(initiallySleeping);
             const pendingCommands = pendingTextCommandsRef.current.splice(0);
             for (const command of pendingCommands) {
               if (ws.readyState !== WebSocket.OPEN) break;
@@ -622,6 +696,9 @@ export default function App() {
 
           // 2. Received response audio chunk (24kHz)
           if (data.audio) {
+            if (voiceControllerRef.current?.sleeping) return;
+            voiceControllerRef.current?.markSpeaking();
+            setVoicePhase(voiceControllerRef.current?.state || "speaking");
             setAssistantState("speaking");
             streamerRef.current?.setPlaybackActive(true);
             if (playerRef.current) {
@@ -637,6 +714,29 @@ export default function App() {
               playerRef.current.stopAll();
             }
             streamerRef.current?.setPlaybackActive(false);
+            voiceControllerRef.current?.markGenuineSpeech();
+            setVoicePhase(voiceControllerRef.current?.state || "listening");
+          }
+
+          if (data.type === "wake_accepted") {
+            if (voiceControllerRef.current?.wake()) {
+              streamerRef.current?.setWakeWordMode(false);
+              setVoicePhase("listening");
+              setAssistantState("listening");
+              setCurrentCaption("Listening...");
+              setCaptionRole("model");
+            }
+            return;
+          }
+
+          if (data.type === "wake_duplicate_ignored") {
+            console.info("[WakeWord] Duplicate ignored by server");
+            return;
+          }
+
+          if (data.type === "voice_state" && data.state === "sleeping") {
+            setVoicePhase("sleeping");
+            return;
           }
 
           if (data.type === "session_replaced") {
@@ -648,12 +748,16 @@ export default function App() {
 
           // 4. Transcription captures
           if (data.text) {
+            const displayText = toLatinDisplayText(String(data.text));
             if (data.role === "user") {
-              bufferUserTranscript(data.text);
+              voiceControllerRef.current?.markThinking();
+              setVoicePhase(voiceControllerRef.current?.state || "thinking");
+              bufferUserTranscript(displayText);
               return;
             }
             commitPendingUserTranscript();
-            setCurrentCaption(data.text);
+            if (voiceControllerRef.current?.sleeping) return;
+            setCurrentCaption(displayText);
             setCaptionRole(data.role);
 
             // Add to transcript log
@@ -664,14 +768,14 @@ export default function App() {
               if (lastLine && lastLine.role === data.role && lastTimestamp && (Date.now() - lastTimestamp.getTime() < 10000)) {
                 return [
                   ...prev.slice(0, -1),
-                  { ...lastLine, text: lastLine.text + " " + data.text },
+                  { ...lastLine, text: lastLine.text + " " + displayText },
                 ];
               } else {
                 return [
                   ...prev,
                   {
                     id: Math.random().toString(36).substr(2, 9),
-                    text: data.text,
+                    text: displayText,
                     role: data.role,
                     timestamp: new Date(),
                   },
@@ -689,6 +793,11 @@ export default function App() {
 
           if (data.type === "turn_complete") {
             commitPendingUserTranscript();
+            const controller = voiceControllerRef.current;
+            if (controller && controller.state !== "speaking") {
+              controller.waitForUser();
+              setVoicePhase(controller.state);
+            }
           }
 
           // 5.5 Handle persistent memory syncing
@@ -713,17 +822,23 @@ export default function App() {
       };
 
       ws.onclose = () => {
+        if (sessionGeneration !== sessionGenerationRef.current || socketRef.current !== ws) return;
+        sessionStartingRef.current = false;
         console.log("WebSocket connection closed.");
         stopSession("Session ended. Tap to restart!");
       };
 
       ws.onerror = (err) => {
+        if (sessionGeneration !== sessionGenerationRef.current || socketRef.current !== ws) return;
+        sessionStartingRef.current = false;
         console.error("WebSocket error:", err);
         setErrorMessage("Websocket connection error. Please verify your server is running.");
         stopSession("Connection error. Tap to retry.");
       };
 
     } catch (err: any) {
+      if (sessionGeneration !== sessionGenerationRef.current) return;
+      sessionStartingRef.current = false;
       console.error("Failed to connect:", err);
       setErrorMessage(err.message || "Failed to start Shree session.");
       stopSession("Failed to connect.");
@@ -731,11 +846,14 @@ export default function App() {
   };
 
   const submitTextCommand = async () => {
-    const command = textCommand.trim();
+    const command = toLatinDisplayText(textCommand.trim());
     if (!command) return;
     setTextCommand("");
     setTranscriptHistory(previous => [...previous, {id:`typed-${Date.now()}`,role:"user",text:command,timestamp:new Date()}]);
     playerRef.current?.stopAll();
+    voiceControllerRef.current?.wake();
+    voiceControllerRef.current?.markThinking();
+    setVoicePhase(voiceControllerRef.current?.state || "thinking");
     if (stateRef.current === "speaking") setAssistantState("listening");
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN && stateRef.current !== "disconnected") {
@@ -792,22 +910,36 @@ export default function App() {
   const toggleSession = () => {
     if (assistantState === "disconnected") {
       startSession();
+    } else if (assistantState === "connecting") {
+      return;
+    } else if (voiceControllerRef.current?.sleeping) {
+      voiceControllerRef.current.wake();
+      streamerRef.current?.setWakeWordMode(false);
+      setVoicePhase("listening");
+      socketRef.current?.send(JSON.stringify({ type: "voice_mode", mode: "active" }));
+      setCurrentCaption("Listening...");
+      setCaptionRole("model");
     } else {
-      stopSession();
+      if (runtimeSettings.wake_word_enabled && runtimeSettings.background_listening) {
+        playerRef.current?.stopAll();
+        streamerRef.current?.setPlaybackActive(false);
+        voiceControllerRef.current?.sleepNow();
+      } else {
+        stopSession();
+      }
     }
   };
 
   useEffect(() => {
-    if (setupReady && runtimeSettings.wake_word_enabled && runtimeSettings.background_listening && assistantState === "disconnected" && !backgroundStartAttempted.current) {
-      backgroundStartAttempted.current = true;
-      startSession();
-    }
-  }, [setupReady, runtimeSettings.wake_word_enabled, runtimeSettings.background_listening]);
+    if (!setupReady || !runtimeSettings.wake_word_enabled || !runtimeSettings.background_listening || assistantState !== "disconnected") return;
+    const retry = window.setTimeout(() => startSession({ wakeOnly: true }), 350);
+    return () => window.clearTimeout(retry);
+  }, [setupReady, runtimeSettings.wake_word_enabled, runtimeSettings.background_listening, assistantState]);
 
   useEffect(() => window.shreeDesktop?.onCompanionToggleSession(toggleSession), [assistantState, setupReady, runtimeSettings]);
 
   useEffect(() => {
-    const companionState = assistantState === "disconnected"
+    const companionState = assistantState === "disconnected" || voicePhase === "sleeping"
       ? (errorMessage ? "error" : "idle")
       : (assistantState === "listening" && captionRole === "user" ? "thinking" : assistantState);
     window.shreeDesktop?.reportCompanionSessionState({
@@ -817,7 +949,7 @@ export default function App() {
       caption: currentCaption,
       captionRole,
     });
-  }, [assistantState, audioVolume, captionRole, currentCaption, errorMessage]);
+  }, [assistantState, voicePhase, audioVolume, captionRole, currentCaption, errorMessage]);
 
   return (
     <div className="h-screen bg-[#020203] text-[#f0f0f0] flex flex-col font-sans relative overflow-hidden select-none">
@@ -837,7 +969,7 @@ export default function App() {
             "bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"
           }`} />
           <span className="text-[10px] tracking-[0.25em] font-medium text-cyan-400 uppercase">
-            {assistantState === "disconnected" ? "Offline" : "System Connected"}
+            {assistantState === "disconnected" ? "Offline" : voicePhase === "sleeping" ? 'Waiting for "Shree"' : "System Connected"}
           </span>
         </div>
 
@@ -920,7 +1052,7 @@ export default function App() {
                   <span className="text-[10px] font-mono tracking-wider font-semibold text-white/40 uppercase">Dialogue Stream</span>
                 </div>
                 <div className="px-1.5 py-0.5 rounded bg-cyan-500/5 border border-cyan-500/10 text-[8px] font-mono text-cyan-400 uppercase">
-                  {assistantState}
+                  {assistantState === "disconnected" ? assistantState : voicePhase.replaceAll("_", " ")}
                 </div>
               </div>
 
@@ -929,7 +1061,7 @@ export default function App() {
                 {assistantState !== "disconnected" && (
                   <div className="p-3 rounded-xl bg-cyan-950/20 border border-cyan-500/10 backdrop-blur-sm">
                     <span className="text-[9px] font-mono text-cyan-400 tracking-wider block uppercase mb-1">
-                      {assistantState === "listening" ? "Listening..." : "Speaking..."}
+                      {voicePhase === "sleeping" ? 'Waiting for "Shree"' : voicePhase === "thinking" ? "Thinking..." : assistantState === "listening" ? "Listening..." : "Speaking..."}
                     </span>
                     <DecorativeWaveform />
                     <span className="text-[8px] text-slate-500 font-mono">00:07</span>
@@ -1102,6 +1234,7 @@ export default function App() {
                 <button 
                   onClick={toggleSession}
                   className={`w-14 h-14 rounded-full flex items-center justify-center relative cursor-pointer border-4 border-fuchsia-500/20 shadow-[0_0_15px_rgba(217,70,239,0.3)] hover:shadow-[0_0_20px_rgba(217,70,239,0.5)] hover:scale-105 active:scale-95 transition-all duration-300 z-20 ${
+                    voicePhase === "sleeping" ? "bg-[#090b17]" :
                     assistantState === "listening" ? "bg-fuchsia-600" : 
                     assistantState === "speaking" ? "bg-rose-500 animate-pulse" : 
                     assistantState === "connecting" ? "bg-purple-600 animate-bounce" :

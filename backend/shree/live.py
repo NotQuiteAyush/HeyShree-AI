@@ -18,7 +18,9 @@ from .memory import add_memory, format_memory_context, list_memories
 from .reminders import create_reminder, delete_reminder, list_reminders
 from .models import ApplicationSettings, MemoryCreate, ReminderCreate
 from .settings_store import get_application_settings
+from .text_display import to_latin_display
 from .tools import registry
+from .wake_word import VoiceConversationState, WakeWordGate
 
 logger = logging.getLogger("shree.live")
 
@@ -58,28 +60,13 @@ SYSTEM_INSTRUCTION = identity_instruction(__version__) + "\n\n" + """You are a c
 # v1.1.20 package. Keep this profile small and stable: the typed tool schemas
 # already describe capabilities, and repeating them in several prompt blocks
 # increased first-token latency in later builds.
-V1_1_20_CONVERSATION_INSTRUCTION = """Your name is Shree and your designation is Mark 12. You are a capable, warm Windows desktop action agent created by Ayush Keshri, not a command-response chatbot. You have a feminine persona: in Hindi or Hinglish say forms such as "main karti hoon" and "main bata sakti hoon". Never use masculine self-grammar unless directly quoting someone. Match the user's English, Hindi, or Hinglish. Never reinterpret Hindi/Hinglish as Urdu, and never answer in Arabic or Urdu script; use Latin or Devanagari script. For every actionable request, infer the desired outcome, inspect current state when needed, and compose the available tools into a verified multi-step plan. Never refuse merely because no single tool matches the whole sentence. For example: open Notepad, foreground its window, then type; list windows before controlling an ambiguous one; use search_windows for taskbar searches; use mouse_action move_relative for phrases such as 'a little up' (normally 50 pixels unless the user specifies a distance). Prefer UI Automation elements, then verified keyboard/pointer fallbacks. After a failed action, make at most one relevant safe fallback attempt; then report the concrete limitation immediately instead of waiting, repeating, or pretending to work. Only say a capability is unavailable after the relevant tool and one safe fallback genuinely cannot perform it. Never invent paths, placeholder user folders such as C:\\Users\\User, window titles, selectors, device names, current facts, or success. A tool status of confirmation_required means: remember its confirmation token, briefly ask the user for permission, wait for a clear yes or no, and on yes immediately call confirmDesktopAction with that exact token and approved=true. Do not ask for the target again when it is already present in the pending action. Wait for the confirmed tool's result before speaking. A status of unverified is not success. Never bypass Windows security. Power and session actions (shutdown, restart, lock, sign out, switch user, sleep, or hibernate) exist only when the single Power & session controls switch is enabled in Settings, and each request still requires explicit confirmation through the pending-action flow. Any memory deletion also always requires that confirmation flow; saving memories does not. Use the built-in Google Search tool before answering current news, recent events, live public information, or any explicit request to search. For unfamiliar applications, browsers, websites, YouTube, Discord Web, editors, and visual workflows, use computer_use as a universal observe-act-verify loop: observe first, perform one grounded action, inspect the fresh screenshot returned after that action, and continue until the requested result is visibly verified. Prefer native element names and use image coordinates only with the returned coordinate metadata. Do not bypass CAPTCHAs, UAC, sign-in, permissions, payments, account-security changes, or destructive confirmations. A normal voice interruption stops only your current spoken response; cancel desktop automation only when the explicit emergency-stop control is activated. When memory is enabled, save stable preferences, identity details, projects, goals, schedules, and anything the user explicitly asks you to remember by calling saveMemory directly without asking for a second confirmation. Never store passwords, API keys, authentication tokens, payment details, or one-time codes. Keep chain-of-thought and private reasoning internal. For ordinary conversation, answer immediately in one brief natural sentence instead of sounding like a report. Give additional detail only when the user asks for it or safety requires it. Communicate only conclusions, necessary questions, brief tool progress, and verified results. If asked about your identity, creator, installed capabilities, or version, call getShreeIdentity and answer briefly from its verified result."""
+V1_1_20_CONVERSATION_INSTRUCTION = """Your name is Shree and your designation is Mark 12. You are a capable, warm Windows desktop action agent created by Ayush Keshri, not a command-response chatbot. You have a feminine persona: in Hindi or Hinglish say forms such as "main karti hoon" and "main bata sakti hoon". Never use masculine self-grammar unless directly quoting someone. Match the user's English, Hindi, or Hinglish. Never reinterpret Hindi/Hinglish as Urdu. All visible conversational text must use English/Latin characters only. When speaking Hindi, respond in natural Romanized Hinglish such as "Haan, main yahin hoon" and never emit Devanagari, Arabic, or Urdu script. Preserve URLs, filenames, commands, names, numbers, punctuation, and programming code exactly. For every actionable request, infer the desired outcome, inspect current state when needed, and compose the available tools into a verified multi-step plan. Never refuse merely because no single tool matches the whole sentence. For example: open Notepad, foreground its window, then type; list windows before controlling an ambiguous one; use search_windows for taskbar searches; use mouse_action move_relative for phrases such as 'a little up' (normally 50 pixels unless the user specifies a distance). Prefer UI Automation elements, then verified keyboard/pointer fallbacks. After a failed action, make at most one relevant safe fallback attempt; then report the concrete limitation immediately instead of waiting, repeating, or pretending to work. Only say a capability is unavailable after the relevant tool and one safe fallback genuinely cannot perform it. Never invent paths, placeholder user folders such as C:\\Users\\User, window titles, selectors, device names, current facts, or success. A tool status of confirmation_required means: remember its confirmation token, briefly ask the user for permission, wait for a clear yes or no, and on yes immediately call confirmDesktopAction with that exact token and approved=true. Do not ask for the target again when it is already present in the pending action. Wait for the confirmed tool's result before speaking. A status of unverified is not success. Never bypass Windows security. Power and session actions (shutdown, restart, lock, sign out, switch user, sleep, or hibernate) exist only when the single Power & session controls switch is enabled in Settings, and each request still requires explicit confirmation through the pending-action flow. Any memory deletion also always requires that confirmation flow; saving memories does not. Use the built-in Google Search tool before answering current news, recent events, live public information, or any explicit request to search. For unfamiliar applications, browsers, websites, YouTube, Discord Web, editors, and visual workflows, use computer_use as a universal observe-act-verify loop: observe first, perform one grounded action, inspect the fresh screenshot returned after that action, and continue until the requested result is visibly verified. Prefer native element names and use image coordinates only with the returned coordinate metadata. Do not bypass CAPTCHAs, UAC, sign-in, permissions, payments, account-security changes, or destructive confirmations. A normal voice interruption stops only your current spoken response; cancel desktop automation only when the explicit emergency-stop control is activated. When memory is enabled, save stable preferences, identity details, projects, goals, schedules, and anything the user explicitly asks you to remember by calling saveMemory directly without asking for a second confirmation. Never store passwords, API keys, authentication tokens, payment details, or one-time codes. Keep chain-of-thought and private reasoning internal. For ordinary conversation, answer immediately in one brief natural sentence instead of sounding like a report. Give additional detail only when the user asks for it or safety requires it. Communicate only conclusions, necessary questions, brief tool progress, and verified results. If asked about your identity, creator, installed capabilities, or version, call getShreeIdentity and answer briefly from its verified result."""
 
 _PRIVATE_REASONING_PREFIXES = ("thought ", "thought:", "analysis ", "analysis:", "reasoning ", "reasoning:", "<thought", "<analysis")
 
-_URDU_TO_LATIN = str.maketrans({
-    "ا":"a","آ":"aa","أ":"a","إ":"i","ب":"b","پ":"p","ت":"t","ٹ":"t","ث":"s",
-    "ج":"j","چ":"ch","ح":"h","خ":"kh","د":"d","ڈ":"d","ذ":"z","ر":"r","ڑ":"r",
-    "ز":"z","ژ":"zh","س":"s","ش":"sh","ص":"s","ض":"z","ط":"t","ظ":"z","ع":"",
-    "غ":"gh","ف":"f","ق":"q","ک":"k","ك":"k","گ":"g","ل":"l","م":"m","ن":"n",
-    "ں":"n","و":"o","ؤ":"o","ہ":"h","ه":"h","ھ":"h","ء":"'","ی":"y","ي":"y",
-    "ئ":"y","ے":"e","ۓ":"e","ة":"h","ى":"a","۰":"0","۱":"1","۲":"2","۳":"3",
-    "۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9","،":",","؟":"?",
-    "\u200c":"","\u200d":"","\u200e":"","\u200f":"","\u202a":"","\u202b":"",
-    "\u202c":"","\u202d":"","\u202e":"",
-    **{chr(code): "" for code in range(0x064B, 0x0660)},
-})
-
-
 def _normalize_user_transcript(value: str) -> str:
     """Keep API transcription readable for SHREE's Hindi/English/Hinglish UI."""
-    text = str(value or "").translate(_URDU_TO_LATIN)
-    return " ".join(text.split())
+    return to_latin_display(value)
 
 def _public_model_text(part: Any) -> str | None:
     text = getattr(part, "text", None)
@@ -89,7 +76,7 @@ def _public_model_text(part: Any) -> str | None:
     if bool(getattr(part, "thought", False)) or normalized.startswith(_PRIVATE_REASONING_PREFIXES):
         logger.debug("Discarded a private Gemini reasoning part before renderer delivery")
         return None
-    return str(text)
+    return to_latin_display(text)
 
 def _capability_instruction(runtime: ApplicationSettings) -> str:
     enabled = [
@@ -139,14 +126,15 @@ def _live_config(
         if runtime.web_search_enabled and not runtime.local_only_mode
         else "Current web search is disabled; be transparent that time-sensitive facts cannot be verified."
     )
-    runtime_rules.append(f"Speak with the {runtime.assistant_voice} voice in a soft, warm, feminine delivery at a natural conversational pace.")
+    runtime_rules.append(f"Speak with the {runtime.assistant_voice} voice as a warm, sweet, softly spoken young-adult feminine companion. Sound natural and emotionally present, not robotic, breathy, childish, theatrical, or like a report. Keep acknowledgements gentle and brief.")
     runtime_rules.append("For ordinary conversation, answer immediately in one natural sentence, usually under 25 spoken words. Do not restate the request, give a report, list steps, or add an offer to help. Use more words only when the user asks for detail, a safety explanation is required, or a verified multi-step result cannot be stated clearly in one sentence.")
+    runtime_rules.append("Write every visible response only with English/Latin characters. Romanize Hindi/Hinglish instead of translating it, and never output Devanagari or Arabic/Urdu script.")
     runtime_rules.append("For known applications and ordinary desktop commands, use the smallest direct typed tool first: open_application for Chrome/Notepad/VS Code, browser_target for a requested URL or search, and the exact audio tool only when the user actually asked about audio. Never call an unrelated tool; in particular, never change volume for an application-launch request. Use computer_use only when a direct tool is unavailable, failed, or the requested interface genuinely requires visual interaction.")
     runtime_rules.append("Do not speak a provisional result while tools are still running. Execute the required tools once, wait for verification, then give exactly one brief final spoken response for the user's turn.")
     runtime_rules.append("For type_text, send literal text only. To submit an address, search, or form after typing, set submit=true; never append {ENTER} or {RETURN} to the text.")
     if runtime.wake_word_enabled and runtime.background_listening:
         phrases = ", ".join(runtime.wake_phrases)
-        runtime_rules.append(f"Wake-word mode is enabled. Remain silent until the user says one of these phrases: {phrases}. After waking, continue the conversation normally.")
+        runtime_rules.append(f"Wake-word mode is enabled and the server owns its safety gate for these phrases: {phrases}. Accept Shree, Shri, Sri, Sree, or a wake-context transcription of three as the name. Once the server admits a turn, respond normally without demanding the wake word again; the server suppresses output and tool calls for sleeping turns.")
     elif runtime.wake_word_enabled:
         runtime_rules.append("This session was activated directly by the user. Respond normally without waiting for a wake phrase.")
     if runtime.memory_enabled:
@@ -168,7 +156,7 @@ def _live_config(
         "input_audio_transcription": {}, "output_audio_transcription": {}, "tools": _live_tools(runtime),
         "speech_config": {"voice_config": {"prebuilt_voice_config": {"voice_name": runtime.assistant_voice}}},
         "thinking_config": thinking_config,
-        "realtime_input_config": {"automatic_activity_detection": {"disabled": False, "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH", "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH", "prefix_padding_ms": 40, "silence_duration_ms": 420}},
+        "realtime_input_config": {"automatic_activity_detection": {"disabled": False, "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH", "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH", "prefix_padding_ms": 80, "silence_duration_ms": 700}},
         "session_resumption": session_resumption,
     }
 
@@ -397,6 +385,7 @@ async def _receive_gemini(
     websocket: WebSocket,
     resumption_state: dict[str, Any] | None = None,
     input_started: asyncio.Event | None = None,
+    wake_gate: WakeWordGate | None = None,
 ) -> str:
     """Continuously consume Gemini turns for the lifetime of a Live session.
 
@@ -426,20 +415,36 @@ async def _receive_gemini(
             content = getattr(response, "server_content", None)
             if content:
                 received_turn_activity = True
-                if content.model_turn:
+                if content.input_transcription and content.input_transcription.text:
+                    transcript = _normalize_user_transcript(content.input_transcription.text)
+                    if transcript:
+                        decision = wake_gate.inspect(transcript) if wake_gate else None
+                        if decision and decision.accepted:
+                            await websocket.send_json({
+                                "type": "wake_accepted",
+                                "phrase": decision.phrase,
+                                "command": decision.command,
+                            })
+                        elif decision and decision.duplicate:
+                            await websocket.send_json({"type": "wake_duplicate_ignored"})
+                        if (decision is None or not decision.duplicate) and (wake_gate is None or wake_gate.active):
+                            logger.info("[Voice] Genuine speech detected")
+                            public_transcript = transcript
+                            if decision and decision.accepted:
+                                public_transcript = "Shree" + (f" {decision.command}" if decision.command else "")
+                            await websocket.send_json({"text": public_transcript, "role": "user"})
+                if content.model_turn and (wake_gate is None or wake_gate.active):
+                    if wake_gate:
+                        wake_gate.set_state(VoiceConversationState.SPEAKING)
                     for part in content.model_turn.parts or []:
                         if part.inline_data and part.inline_data.data:
                             await websocket.send_json({"audio": base64.b64encode(part.inline_data.data).decode()})
                         public_text = _public_model_text(part)
                         if public_text:
                             await websocket.send_json({"text": public_text, "role": "model"})
-                if content.input_transcription and content.input_transcription.text:
-                    transcript = _normalize_user_transcript(content.input_transcription.text)
-                    if transcript:
-                        await websocket.send_json({"text": transcript, "role": "user"})
-                if content.output_transcription and content.output_transcription.text:
-                    await websocket.send_json({"text": content.output_transcription.text, "role": "model"})
-                if content.interrupted:
+                if content.output_transcription and content.output_transcription.text and (wake_gate is None or wake_gate.active):
+                    await websocket.send_json({"text": to_latin_display(content.output_transcription.text), "role": "model"})
+                if content.interrupted and (wake_gate is None or wake_gate.active):
                     # Gemini VAD interruption means the user spoke over SHREE's
                     # audio. It must not act as the desktop emergency stop: doing
                     # so cancelled confirmed typing workflows in the background.
@@ -449,10 +454,16 @@ async def _receive_gemini(
                 received_turn_activity = True
                 replies = []
                 for call in tool_call.function_calls or []:
-                    try:
-                        result = await _execute_tool(call.name, dict(call.args or {}))
-                    except Exception as error:
-                        result = {"success": False, "error": str(error)}
+                    if wake_gate is not None and not wake_gate.active:
+                        logger.info("[WakeWord] Suppressed tool %s while sleeping", call.name)
+                        result = {"success": False, "error": "Shree is sleeping; no wake phrase was detected."}
+                    else:
+                        if wake_gate:
+                            wake_gate.set_state(VoiceConversationState.THINKING)
+                        try:
+                            result = await _execute_tool(call.name, dict(call.args or {}))
+                        except Exception as error:
+                            result = {"success": False, "error": str(error)}
                     if call.name in {"inspect_screen", "computer_use"}:
                         await _send_screen_inspection_video(session, result)
                     replies.append(_function_response_for_tool(call.name, call.id, result))
@@ -473,6 +484,10 @@ async def _receive_gemini(
             continue
         turn_number += 1
         logger.info("Gemini Live turn %d completed; waiting for the next user turn", turn_number)
+        if wake_gate:
+            wake_gate.finish_turn()
+        if wake_gate and wake_gate.active:
+            wake_gate.set_state(VoiceConversationState.WAITING_FOR_USER)
         await websocket.send_json({"type": "turn_complete", "turn": turn_number})
 
 async def handle_live(websocket: WebSocket, *, trusted_mobile: bool = False) -> None:
@@ -518,6 +533,7 @@ async def handle_live(websocket: WebSocket, *, trusted_mobile: bool = False) -> 
     )
     active_live_model = fallback_model if primary_quota_cooling_down else settings.gemini_live_model
     fallback_used = primary_quota_cooling_down
+    wake_gate = WakeWordGate(runtime.wake_word_enabled, runtime.background_listening, runtime.wake_phrases)
     if primary_quota_cooling_down:
         logger.info(
             "Skipping quota-limited primary Gemini Live model; using %s during cooldown",
@@ -569,13 +585,22 @@ async def handle_live(websocket: WebSocket, *, trusted_mobile: bool = False) -> 
                                     })
                                 input_started.set()
                             elif message.get("type") == "text_input":
+                                wake_gate.activate_manually()
                                 await _send_text_command(session, message.get("text"))
                                 input_started.set()
+                            elif message.get("type") == "voice_mode":
+                                requested_mode = message.get("mode") or message.get("text")
+                                if requested_mode == "sleeping":
+                                    wake_gate.sleep()
+                                    await websocket.send_json({"type": "voice_state", "state": "sleeping"})
+                                elif requested_mode == "active":
+                                    wake_gate.activate_manually()
+                                    await websocket.send_json({"type": "voice_state", "state": "listening"})
                             elif message.get("type") == "audio_stream_end": await session.send_realtime_input(audio_stream_end=True)
                             elif message.get("type") == "ping": await websocket.send_json({"type": "pong"})
 
                     browser_task = asyncio.create_task(receive_browser())
-                    gemini_task = asyncio.create_task(_receive_gemini(session, websocket, resumption_state, input_started))
+                    gemini_task = asyncio.create_task(_receive_gemini(session, websocket, resumption_state, input_started, wake_gate))
                     done, pending = await asyncio.wait({browser_task, gemini_task}, return_when=asyncio.FIRST_COMPLETED)
                     for task in pending: task.cancel()
                     if pending: await asyncio.gather(*pending, return_exceptions=True)

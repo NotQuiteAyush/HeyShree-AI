@@ -220,12 +220,16 @@ private fun CompanionScreen(
                         onDeleteReminder = model::deleteReminder,
                         onMemory = { section = MobileSection.Memory },
                     )
-                    MobileSection.Chat -> ChatScreen(chat, transcript)
+                    MobileSection.Chat -> ChatScreen(chat, transcript, model::sendText)
                     MobileSection.Voice -> VoiceScreen(voice, stateColor, transcript, toggleVoice)
                     MobileSection.Memory -> MemoryScreen(memories)
                     MobileSection.Settings -> SystemTools(
                         onPermissions = {
-                            val requested = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.CALL_PHONE)
+                            val requested = mutableListOf(
+                                Manifest.permission.CAMERA, Manifest.permission.CALL_PHONE,
+                                Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALENDAR,
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                            )
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) requested += Manifest.permission.POST_NOTIFICATIONS
                             phonePermissions.launch(requested.toTypedArray())
                         },
@@ -407,9 +411,10 @@ private fun SystemStatusCard(systemStatus: SystemStatus) {
 }
 
 @Composable
-private fun ChatScreen(chat: List<ChatEntry>, transcript: String) {
+private fun ChatScreen(chat: List<ChatEntry>, transcript: String, onSend: (String) -> Unit) {
+    var message by remember { mutableStateOf("") }
     SectionTitle("CHAT WITH SHREE", "Conversation synchronized from your active session")
-    if (chat.isEmpty() && transcript.isBlank()) EmptyPanel("Start a voice conversation to see messages here.")
+    if (chat.isEmpty() && transcript.isBlank()) EmptyPanel("Type below or start a voice conversation.")
     chat.takeLast(30).forEach { entry ->
         GlassCard(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
             Column(Modifier.padding(15.dp)) {
@@ -417,6 +422,15 @@ private fun ChatScreen(chat: List<ChatEntry>, transcript: String) {
                 Spacer(Modifier.height(6.dp)); Text(entry.text, color = Color(0xFFE8EDFA), fontSize = 13.sp, lineHeight = 19.sp)
             }
         }
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = message, onValueChange = { message = it }, modifier = Modifier.weight(1f),
+            label = { Text("Message Shree") }, maxLines = 4,
+        )
+        Spacer(Modifier.width(8.dp))
+        Button(onClick = { val value = message.trim(); if (value.isNotEmpty()) { onSend(value); message = "" } }) { Text("SEND") }
     }
 }
 
